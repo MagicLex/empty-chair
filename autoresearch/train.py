@@ -81,15 +81,17 @@ def get_frame() -> pd.DataFrame:
 # ---------------------------------------------------------------- experiment area
 
 def build_model(cols_cat, cols_num):
-    """Baseline: faithful reproduction of train_chair.py's model."""
+    """Exp: LightGBM with scale_pos_weight instead of HGB balanced."""
+    from lightgbm import LGBMClassifier
     pre = ColumnTransformer(
         [("cat", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1,
                                 encoded_missing_value=-1), cols_cat),
          ("num", "passthrough", cols_num)])
-    clf = HistGradientBoostingClassifier(
-        max_iter=400, learning_rate=0.05, max_leaf_nodes=31,
-        l2_regularization=1.0, early_stopping=True, validation_fraction=0.15,
-        class_weight="balanced", random_state=0)
+    clf = LGBMClassifier(
+        n_estimators=600, learning_rate=0.05, num_leaves=63,
+        reg_lambda=1.0, scale_pos_weight=19.7, min_child_samples=40,
+        colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
+        random_state=0, n_jobs=4, verbose=-1)
     return Pipeline([("pre", pre), ("clf", clf)])
 
 
