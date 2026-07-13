@@ -25,13 +25,14 @@ from contextlib import asynccontextmanager
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: F401
 
 CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if CODE_DIR not in sys.path:
     sys.path.insert(0, CODE_DIR)
 
 import anthropic  # noqa: E402
+import ask as A  # noqa: E402
 import explain as E  # noqa: E402
 from auditor import MODEL_VERSION  # noqa: E402
 from chair_features import CONCEALMENT_FLAGS  # noqa: E402
@@ -210,6 +211,16 @@ td.no{font:.82rem var(--mono);color:var(--dim)}
 .leg .sq{display:inline-block;width:9px;height:9px;border:2px solid var(--ink);
  vertical-align:-2px;background:var(--paper);padding:0}
 .leg .sq.c{border-color:#2a6db5;border-radius:3px}
+/* ask the register */
+.askwrap{margin-top:36px}
+.alog{max-height:360px;overflow-y:auto}
+.alog:empty{display:none}
+.aq{font:700 .8rem/1.4 var(--mono);background:var(--ink);color:var(--paper);
+ padding:7px 11px;margin:12px 0 6px;letter-spacing:.03em}
+.aq::before{content:"Q // ";color:#cfc8b8}
+.aa{font:.9rem/1.62 Georgia,serif;white-space:pre-wrap;padding:2px 0 10px;
+ border-bottom:1px solid var(--faint)}
+form.askf{display:flex;gap:0;border:2px solid var(--ink);margin-top:10px}
 .foot{color:var(--dim);font:.68rem/1.6 var(--mono);letter-spacing:.06em;margin-top:44px;
  border-top:1px solid var(--ink);padding-top:12px;text-transform:uppercase}
 """
@@ -236,6 +247,33 @@ document.querySelectorAll('.hist i,.phist i').forEach(function(b){
   var t=(b.getAttribute('data-c')||'').split(' · ');
   tipShow([[t[0]||'',t[1]||'']],ev.clientX,ev.clientY);});
  b.addEventListener('pointerleave',tipHide);});
+
+document.querySelectorAll('form.askf').forEach(function(f){
+ f.addEventListener('submit',function(ev){
+  if(!window.fetch||!window.ReadableStream)return;
+  ev.preventDefault();
+  var q=f.q.value.trim();if(!q||f.q.disabled)return;
+  var log=f.parentElement.querySelector('.alog');
+  var uq=document.createElement('div');uq.className='aq';uq.textContent=q;log.appendChild(uq);
+  var ua=document.createElement('div');ua.className='aa';
+  ua.textContent='consulting the register…';log.appendChild(ua);
+  f.q.value='';f.q.disabled=true;var first=true;
+  function done(){f.q.disabled=false;f.q.focus();
+   var h=[];try{h=JSON.parse(f.hist.value)||[];}catch(e){}
+   h.push([q,ua.textContent]);f.hist.value=JSON.stringify(h.slice(-6));}
+  var fd=new FormData();fd.append('q',q);fd.append('ctx',f.ctx.value);fd.append('hist',f.hist.value);
+  fetch(f.getAttribute('action')+'/stream',{method:'POST',body:fd}).then(function(r){
+   var rd=r.body.getReader(),dec=new TextDecoder();
+   function pump(){return rd.read().then(function(x){
+    if(x.done){done();return;}
+    if(first){ua.textContent='';first=false;}
+    ua.textContent+=dec.decode(x.value,{stream:true});
+    log.scrollTop=log.scrollHeight;
+    return pump();});}
+   return pump();
+  }).catch(function(e){ua.textContent+='\n[error: '+e+']';done();});
+ });
+});
 
 document.querySelectorAll('figure.web').forEach(function(fig){
  var gd=fig.querySelector('script.gd'),svg=fig.querySelector('svg');
@@ -655,6 +693,126 @@ def ego_fig(bd, row):
             + legend() + web_fig(bd, w, focus=row["company_number"]))
 
 
+# ---- ask-the-register: deterministic tools the conversational layer may call ----
+
+def _j(o):
+    return json.dumps(o, default=str)
+
+
+def _tool_lookup_company(args):
+    row = resolve(str(args.get("q", "")))
+    if row is None:
+        return _j({"error": "no company matched"})
+    pctl, band, _ = severity(row["pct_rank"])
+    rates = U.get("rates") or {}
+    tells = [{"tell": label, "population_rate_pct": round(rates.get(k, 0) * 100, 1)}
+             for k, label in CONCEALMENT_FLAGS.items()
+             if row.get(k) is not None and int(row.get(k, 0) or 0) > 0]
+    return _j({"name": row["company_name"], "number": row["company_number"],
+               "score_0to1": round(float(row["score"]), 3), "percentile": pctl,
+               "band": band, "fired_tells": tells,
+               "incorporated": row.get("incorporation_year"),
+               "status": row.get("company_status"), "sic": row.get("sic_code"),
+               "in_scored_nest": row["company_number"] in (U.get("comp_of") or {})})
+
+
+def _tool_ownership_web(args):
+    key = (U.get("comp_of") or {}).get(str(args.get("number", "")).upper().replace(" ", ""))
+    if not key:
+        return _j({"error": "this company does not sit in any scored nest"})
+    nests, mem = U["nests"], U["mem"]
+    owners = [{"owner": str(nests.iloc[i]["owner_name"]),
+               "kind": str(nests.iloc[i]["owner_kind"]),
+               "companies_in_nest": int(nests.iloc[i]["n_members"]),
+               "mean_score": round(float(nests.iloc[i]["mean_score"]), 2)} for i in key]
+    seen = {}
+    for i in key:
+        for x in mem[i]:
+            e = seen.setdefault(x["number"], {"name": x["name"], "score": x["score"], "owners": 0})
+            e["owners"] += 1
+    by_score = sorted(seen.items(), key=lambda kv: -kv[1]["score"])
+    return _j({"n_owners": len(owners), "owners": owners[:20],
+               "n_companies": len(seen),
+               "shared_companies": [{"number": n, **v} for n, v in by_score if v["owners"] > 1][:20],
+               "highest_scoring_members": [{"number": n, "name": v["name"], "score": v["score"]}
+                                           for n, v in by_score[:25]]})
+
+
+def _tool_search_companies(args):
+    sub = str(args.get("name_contains", "")).strip()
+    if len(sub) < 3:
+        return _j({"error": "give at least 3 characters"})
+    df = U["df"]
+    hit = df[df["company_name"].str.upper().str.contains(re.escape(sub.upper()), na=False)]
+    hit = hit.nlargest(10, "score")
+    return _j([{"name": r["company_name"], "number": r["company_number"],
+                "score_0to1": round(float(r["score"]), 3),
+                "percentile": severity(r["pct_rank"])[0]} for _, r in hit.iterrows()])
+
+
+def _tool_top_ranked(args):
+    n = min(int(args.get("limit") or 10), 15)
+    return _j([{"name": r["company_name"], "number": r["company_number"],
+                "score_0to1": round(float(r["score"]), 3),
+                "fired_tell_count": int(r["n_flags"])}
+               for _, r in U["top"].head(n).iterrows()])
+
+
+def _tool_register_stats(args):
+    rates = U.get("rates") or {}
+    df = U["df"]
+    return _j({"companies_scored": int(len(df)), "model_version": MODEL_VERSION,
+               "tell_base_rates_pct": {CONCEALMENT_FLAGS[k]: round(v * 100, 1)
+                                       for k, v in rates.items()},
+               "share_scoring_above_0_5_pct": round(float((df["score"] > .5).mean()) * 100, 2),
+               "scored_nests": int(len(U["nests"])) if U.get("nests") is not None else 0,
+               "linked_webs_rendered": len(U.get("webs") or []),
+               "note": "scores are relative concealment-shape ranks, signal not verdict"})
+
+
+def _tool_owner_nests(args):
+    name = str(args.get("owner_name", "")).strip()
+    nests = U.get("nests")
+    if nests is None or len(name) < 3:
+        return _j({"error": "give at least 3 characters of an owner name"})
+    hit = nests[nests["owner_name"].str.upper().str.contains(re.escape(name.upper()), na=False)]
+    out = []
+    for i in hit.index[:8]:
+        r = nests.iloc[i]
+        out.append({"owner": str(r["owner_name"]), "kind": str(r["owner_kind"]),
+                    "companies_in_nest": int(r["n_members"]),
+                    "mean_score": round(float(r["mean_score"]), 2),
+                    "sample_members": [{"number": x["number"], "name": x["name"],
+                                        "score": x["score"]} for x in U["mem"][i][:10]]})
+    return _j(out or {"error": "no owner matched"})
+
+
+ASK_TOOLS = {"lookup_company": _tool_lookup_company, "ownership_web": _tool_ownership_web,
+             "search_companies": _tool_search_companies, "top_ranked": _tool_top_ranked,
+             "register_stats": _tool_register_stats, "owner_nests": _tool_owner_nests}
+
+
+def exec_tool(name, args):
+    fn = ASK_TOOLS.get(name)
+    return fn(args) if fn else _j({"error": f"unknown tool {name}"})
+
+
+def ask_box(bd, ctx="", pairs=None):
+    rows = "".join(f"<div class=aq>{esc(q)}</div><div class=aa>{esc(a)}</div>"
+                   for q, a in (pairs or []))
+    return (f"<div class=askwrap id=ask><h2 class=sec>Ask the register</h2>"
+            f"<p class=hint>Answers are drawn live from the register through tools: this "
+            f"company, its web, the population. Same ethic as everything here: signal, "
+            f"not verdict.</p>"
+            f"<div class=alog>{rows}</div>"
+            f"<form class=askf method=post action='{bd}/ask'>"
+            f"<input type=hidden name=ctx value='{esc(ctx)}'>"
+            f"<input type=hidden name=hist value='{esc(json.dumps(pairs or []))}'>"
+            f"<input type=text name=q maxlength=300 autocomplete=off "
+            f"placeholder='WHO SHARES OWNERS WITH THIS COMPANY? HOW RARE IS ITS SHAPE?'>"
+            f"<button>Ask</button></form></div>")
+
+
 def evidence_card(row):
     flags = fired(row)
     pctl, band, _ = severity(row["pct_rank"])
@@ -988,7 +1146,7 @@ async def network(req: Request):
             + "<h2 class=sec>Isolated nests &mdash; hottest first</h2>"
             "<div class=grid>"
             + "".join(web_fig(bd, w, small=True) for w in U.get("wheels") or [])
-            + "</div>")
+            + "</div>" + ask_box(bd))
     return HTMLResponse(page(bd, body))
 
 
@@ -1009,12 +1167,13 @@ async def home(req: Request):
     bd = base(req)
     if U["error"]:
         return HTMLResponse(page(bd, f"<div class=band>load error: {esc(U['error'])}</div>"))
-    return HTMLResponse(page(bd, top_table(bd, U["top"])))
+    return HTMLResponse(page(bd, top_table(bd, U["top"]) + ask_box(bd)))
 
 
 def _result(bd, row, review_html):
     return page(bd, f"<div class=stage>{evidence_card(row)}{rail(bd, row, review_html)}</div>"
-                    f"{chair_fig(bd, row)}{ego_fig(bd, row)}")
+                    f"{chair_fig(bd, row)}{ego_fig(bd, row)}"
+                    f"{ask_box(bd, ctx=row['company_number'])}")
 
 
 @app.post("/audit", response_class=HTMLResponse)
@@ -1054,6 +1213,68 @@ async def dossier(req: Request):
                 yield delta
         except Exception as e:
             yield f"\n[dossier error: {e}]"
+    return StreamingResponse(gen(), media_type="text/plain")
+
+
+ASK_GAP = 3.0
+_ask_last = {}
+
+
+def _ask_pairs(hist):
+    try:
+        return [(str(h[0]), str(h[1])) for h in json.loads(hist or "[]")][-8:]
+    except Exception:
+        return []
+
+
+def _throttled(req):
+    ip = req.client.host if req.client else "?"
+    now = time.time()
+    if now - _ask_last.get(ip, 0.0) < ASK_GAP:
+        return True
+    if len(_ask_last) > 10000:
+        _ask_last.clear()
+    _ask_last[ip] = now
+    return False
+
+
+@app.post("/ask", response_class=HTMLResponse)
+async def ask_page(req: Request, q: str = Form(...), ctx: str = Form(default=""),
+                   hist: str = Form(default="[]")):
+    """No-JS fallback: full round trip, whole page back with the transcript."""
+    bd = base(req)
+    pairs = _ask_pairs(hist)
+    if _throttled(req):
+        ans = "One question every few seconds, please."
+    elif ENGINE["client"] is None:
+        ans = "The conversational layer is offline (no model key configured)."
+    else:
+        try:
+            ans = A.run_ask(q, pairs, ctx.strip() or None, ENGINE["client"], exec_tool)
+        except Exception as e:
+            ans = f"ask error: {e}"
+    return HTMLResponse(page(bd, ask_box(bd, ctx=ctx, pairs=pairs + [(q, ans)])))
+
+
+@app.post("/ask/stream")
+async def ask_stream(req: Request, q: str = Form(...), ctx: str = Form(default=""),
+                     hist: str = Form(default="[]")):
+    """Progressive enhancement: streams tool status lines and answer tokens."""
+    if _throttled(req):
+        return StreamingResponse(iter(["One question every few seconds, please."]),
+                                 media_type="text/plain")
+    client = ENGINE["client"]
+    if client is None:
+        return StreamingResponse(iter(["The conversational layer is offline."]),
+                                 media_type="text/plain")
+    pairs = _ask_pairs(hist)
+
+    def gen():
+        try:
+            for delta in A.run_ask_stream(q, pairs, ctx.strip() or None, client, exec_tool):
+                yield delta
+        except Exception as e:
+            yield f"\n[ask error: {e}]"
     return StreamingResponse(gen(), media_type="text/plain")
 
 

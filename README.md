@@ -104,8 +104,9 @@ auditor.py            I   load model, score a company, list fired tells
 score_universe.py     I1  score all 5.7M -> parquet + concealment_dossiers (job)
 build_linkage.py      I2  top 1% -> shared-owner nests (linkage.parquet)   (job)
 explain.py            I   plain-language dossier (Anthropic), signal not verdict
+ask.py                I   ask-the-register: tool-use loop over the live data
 bias_audit.py         pre-publication confound audit -> docs/bias-audit.md
-app/server.py         the review app: audit, chair diagram, webs
+app/server.py         the review app: audit, chair diagram, webs, ask
 app/deploy_app.py     deploy the app
 ```
 
@@ -147,3 +148,10 @@ that works without JavaScript; with it, they hydrate into pan/zoom, ego-highligh
 hover, tooltips, and draggable nodes over a spring simulation seeded from the server
 layout. The rank comes from the ML model; the note only explains it, signal not
 verdict.
+
+Every page carries **Ask the register**: a streaming conversational layer
+(`ask.py`) where the model answers only through deterministic tools over the live
+data (company lookup, ownership webs, name and owner search, population stats).
+No embeddings, no invented numbers; if a tool returns nothing, the answer says so.
+The same signal-not-verdict rules bind every reply. Without JavaScript it degrades
+to a full-page round trip.
