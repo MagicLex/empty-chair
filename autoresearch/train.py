@@ -94,7 +94,7 @@ def build_model(cols_cat, cols_num):
             reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
             colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
             random_state=seed, n_jobs=3, verbose=-1)
-    clf = VotingClassifier([(f"s{s}", lgbm(s)) for s in range(5)], voting="soft")
+    clf = VotingClassifier([(f"s{s}", lgbm(s)) for s in range(10)], voting="soft")
     return Pipeline([("pre", pre), ("clf", clf)])
 
 
