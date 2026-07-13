@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, WebSocket
 from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: F401
 
 CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -221,20 +221,26 @@ td.no{font:.82rem var(--mono);color:var(--dim)}
 .leg .sq{display:inline-block;width:9px;height:9px;border:2px solid var(--ink);
  vertical-align:-2px;background:var(--paper);padding:0}
 .leg .sq.c{border-color:#2a6db5;border-radius:3px}
-/* ask the register: floating panel, native <details> so it works without JS */
-.askfloat{position:fixed;right:18px;bottom:18px;z-index:60;width:min(430px,calc(100vw - 36px))}
-.askfloat summary{list-style:none;cursor:pointer;display:inline-block;float:right;
- background:var(--ink);color:var(--paper);font:700 .74rem/1 var(--mono);
+/* ask the register: full-height right drawer, native <details> so it works without JS */
+.askfloat{position:fixed;right:0;top:0;bottom:0;z-index:60;width:min(440px,100vw);
+ display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;
+ padding:14px;gap:8px;pointer-events:none}
+.askfloat summary{list-style:none;cursor:pointer;display:inline-block;order:2;
+ pointer-events:auto;background:var(--ink);color:var(--paper);font:700 .74rem/1 var(--mono);
  letter-spacing:.18em;text-transform:uppercase;padding:12px 18px;border:2px solid var(--ink);
  box-shadow:4px 4px 0 #19171240;user-select:none}
 .askfloat summary::before{content:"\\25C8 ";color:var(--red)}
 .askfloat summary::-webkit-details-marker{display:none}
 .askfloat summary:hover{background:var(--red);border-color:var(--red)}
 .askfloat[open] summary{background:var(--red);border-color:var(--red)}
-.askp{clear:both;background:var(--paper);border:2px solid var(--ink);
- box-shadow:6px 6px 0 #19171240;padding:12px 14px;margin-top:8px;
- max-height:min(560px,72vh);display:flex;flex-direction:column;
+.askp{order:1;flex:1;width:100%;min-height:0;pointer-events:auto;
+ background:var(--paper);border:2px solid var(--ink);
+ box-shadow:6px 6px 0 #19171240;padding:12px 14px;
+ display:flex;flex-direction:column;
  background-image:repeating-linear-gradient(var(--paper),var(--paper) 27px,#0000 27px,#0000 28px)}
+.atool{font:.68rem/1.6 var(--mono);color:var(--dim);letter-spacing:.1em;
+ text-transform:uppercase;padding:1px 0}
+.atool::before{content:"\\25B8 ";color:var(--red)}
 .ctxchip{font:.66rem/1.5 var(--mono);color:var(--dim);letter-spacing:.04em;
  border-left:2px solid var(--red);padding:3px 8px;margin-bottom:8px}
 .ctxchip b{color:var(--red);letter-spacing:.16em;text-transform:uppercase;margin-right:6px}
@@ -302,31 +308,62 @@ document.querySelectorAll('form.askf .aclr').forEach(function(b){
   f.hist.value='[]';f.q.value='';f.q.focus();});});
 
 document.querySelectorAll('form.askf').forEach(function(f){
+ var wsUrl=(location.protocol==='https:'?'wss://':'ws://')+location.host
+  +f.getAttribute('action')+'/ws';
+ var sock=null;
+ function ensure(cb){
+  if(sock&&sock.readyState===1)return cb(sock);
+  if(!window.WebSocket)return cb(null);
+  var timer=setTimeout(function(){cb(null);cb=function(){};},4000);
+  try{sock=new WebSocket(wsUrl);}catch(e){clearTimeout(timer);return cb(null);}
+  sock.addEventListener('open',function(){clearTimeout(timer);cb(sock);cb=function(){};});
+  sock.addEventListener('error',function(){clearTimeout(timer);sock=null;cb(null);cb=function(){};});
+ }
  f.addEventListener('submit',function(ev){
-  if(!window.fetch||!window.ReadableStream)return;
+  if(!window.fetch)return;
   ev.preventDefault();
   var q=f.q.value.trim();if(!q||f.q.disabled)return;
   var log=f.parentElement.querySelector('.alog');
   var uq=document.createElement('div');uq.className='aq';uq.textContent=q;log.appendChild(uq);
-  var ua=document.createElement('div');ua.className='aa';
-  ua.textContent='consulting the register…';log.appendChild(ua);
+  var ua=document.createElement('div');ua.className='aa';ua.textContent='…';log.appendChild(ua);
   log.scrollTop=log.scrollHeight;
-  f.q.value='';f.q.disabled=true;var first=true;
+  f.q.value='';f.q.disabled=true;
+  function put(t){
+   var stick=log.scrollHeight-log.scrollTop-log.clientHeight<60;
+   if(ua.textContent==='…')ua.textContent='';
+   ua.textContent+=t;
+   if(stick)log.scrollTop=log.scrollHeight;}
+  function toolLine(name){
+   var d=document.createElement('div');d.className='atool';
+   d.textContent='consulting '+name;
+   log.insertBefore(d,ua);
+   log.scrollTop=log.scrollHeight;}
   function done(){f.q.disabled=false;f.q.focus();
    var h=[];try{h=JSON.parse(f.hist.value)||[];}catch(e){}
    h.push([q,ua.textContent]);f.hist.value=JSON.stringify(h.slice(-6));}
-  var fd=new FormData();fd.append('q',q);fd.append('ctx',f.ctx.value);fd.append('hist',f.hist.value);
-  fetch(f.getAttribute('action')+'/stream',{method:'POST',body:fd}).then(function(r){
-   var rd=r.body.getReader(),dec=new TextDecoder();
-   function pump(){return rd.read().then(function(x){
-    if(x.done){done();return;}
-    if(first){ua.textContent='';first=false;}
-    var stick=log.scrollHeight-log.scrollTop-log.clientHeight<60;
-    ua.textContent+=dec.decode(x.value,{stream:true});
-    if(stick)log.scrollTop=log.scrollHeight;
-    return pump();});}
-   return pump();
-  }).catch(function(e){ua.textContent+='\n[error: '+e+']';done();});
+  ensure(function(s){
+   if(s){
+    var onmsg=function(ev2){
+     var m;try{m=JSON.parse(ev2.data);}catch(e){return;}
+     if(m.t==='d')put(m.d);
+     else if(m.t==='tool')toolLine(m.name);
+     else if(m.t==='done'){s.removeEventListener('message',onmsg);done();}};
+    s.addEventListener('message',onmsg);
+    s.send(JSON.stringify({q:q,ctx:f.ctx.value,
+     hist:JSON.parse(f.hist.value||'[]')}));
+    return;
+   }
+   // no websocket: fall back to fetch streaming (may arrive in blocks behind proxies)
+   var fd=new FormData();fd.append('q',q);fd.append('ctx',f.ctx.value);fd.append('hist',f.hist.value);
+   fetch(f.getAttribute('action')+'/stream',{method:'POST',body:fd}).then(function(r){
+    var rd=r.body.getReader(),dec=new TextDecoder();
+    function pump(){return rd.read().then(function(x){
+     if(x.done){done();return;}
+     put(dec.decode(x.value,{stream:true}));
+     return pump();});}
+    return pump();
+   }).catch(function(e){put('\n[error: '+e+']');done();});
+  });
  });
 });
 
@@ -908,7 +945,17 @@ def rail(bd, row, review_html):
 
 
 def meta_of(row):
-    return {k: row.get(k) for k in ("incorporation_year", "company_status", "sic_code")}
+    m = {k: row.get(k) for k in ("incorporation_year", "company_status", "sic_code")}
+    m["population"] = int(len(U["df"])) if U.get("df") is not None else None
+    return m
+
+
+def flags_of(row):
+    """Fired tells with their population base rates, so the note can weigh them."""
+    rates = U.get("rates") or {}
+    return [{"label": label, "rate_pct": round(rates.get(k, 0) * 100, 1)}
+            for k, label in CONCEALMENT_FLAGS.items()
+            if row.get(k) is not None and int(row.get(k, 0) or 0) > 0]
 
 
 def _status_of(num):
@@ -1268,7 +1315,7 @@ async def audit(req: Request, q: str = Form(default=None)):
     if client:
         try:
             review = esc(E.explain(row["company_name"], float(row["pct_rank"]),
-                                   [{"label": t} for t in fired(row)], meta_of(row), client))
+                                   flags_of(row), meta_of(row), client))
         except Exception as e:
             review = f"<span style='color:#7d8894'>dossier error: {esc(e)}</span>"
     return HTMLResponse(_result(bd, row, review))
@@ -1285,7 +1332,7 @@ async def dossier(req: Request):
     def gen():
         try:
             for delta in E.explain_stream(row["company_name"], float(row["pct_rank"]),
-                                          [{"label": t} for t in fired(row)], meta_of(row), client):
+                                          flags_of(row), meta_of(row), client):
                 yield delta
         except Exception as e:
             yield f"\n[dossier error: {e}]"
@@ -1333,6 +1380,56 @@ async def ask_page(req: Request, q: str = Form(...), ctx: str = Form(default="")
                              ask_pairs=pairs + [(q, ans)], ask_open=True))
 
 
+@app.websocket("/ask/ws")
+async def ask_ws(ws: WebSocket):
+    """The chat's real transport. The platform proxy buffers HTTP streaming, but
+    websockets pass through (streamlit apps depend on it), so tokens arrive live.
+    Frames out: {"t":"d","d":<text>} tokens, {"t":"tool","name":..}, {"t":"done"}."""
+    import asyncio
+    await ws.accept()
+    loop = asyncio.get_event_loop()
+    last = 0.0
+    try:
+        while True:
+            msg = await ws.receive_json()
+            q = str(msg.get("q", ""))[:300].strip()
+            ctx = str(msg.get("ctx", ""))[:300]
+            try:
+                pairs = [(str(a), str(b)) for a, b in (msg.get("hist") or [])][-8:]
+            except Exception:
+                pairs = []
+            client = ENGINE["client"]
+            if not q or client is None:
+                await ws.send_json({"t": "done"})
+                continue
+            if time.time() - last < ASK_GAP:
+                await ws.send_json({"t": "d", "d": "One question every few seconds, please."})
+                await ws.send_json({"t": "done"})
+                continue
+            last = time.time()
+            gen = A.run_ask_stream(q, pairs, ctx or None, client, exec_tool)
+
+            def pull(g=gen):
+                try:
+                    return next(g)
+                except StopIteration:
+                    return None
+                except Exception as e:
+                    return f"\n[ask error: {e}]"
+            while True:
+                delta = await loop.run_in_executor(None, pull)
+                if delta is None:
+                    break
+                m = re.match(r"\n?\[consulting (\w+)…\]\n?$", delta)
+                if m:
+                    await ws.send_json({"t": "tool", "name": m.group(1)})
+                else:
+                    await ws.send_json({"t": "d", "d": delta})
+            await ws.send_json({"t": "done"})
+    except Exception:
+        return
+
+
 @app.post("/ask/stream")
 async def ask_stream(req: Request, q: str = Form(...), ctx: str = Form(default=""),
                      hist: str = Form(default="[]")):
@@ -1362,7 +1459,7 @@ class StripForwardedPrefix:
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
+        if scope["type"] in ("http", "websocket"):
             prefix = dict(scope.get("headers") or {}).get(b"x-forwarded-prefix", b"").decode().rstrip("/")
             if not prefix:
                 m = _PROXY_MOUNT.match(scope["path"])
