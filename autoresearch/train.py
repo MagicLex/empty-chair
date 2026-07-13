@@ -88,10 +88,10 @@ def build_model(cols_cat, cols_num):
                                 encoded_missing_value=-1), cols_cat),
          ("num", "passthrough", cols_num)])
     clf = LGBMClassifier(
-        n_estimators=1000, learning_rate=0.03, num_leaves=63,
-        reg_lambda=1.0, scale_pos_weight=1.0, min_child_samples=40,
+        n_estimators=1000, learning_rate=0.03, num_leaves=31,
+        reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
         colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
-        random_state=0, n_jobs=4, verbose=-1)
+        random_state=0, n_jobs=3, verbose=-1)
     return Pipeline([("pre", pre), ("clf", clf)])
 
 
