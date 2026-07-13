@@ -98,7 +98,17 @@ def build_model(cols_cat, cols_num):
 def add_features(df: pd.DataFrame):
     """Derived features computed from the disclosure columns only.
     Returns (df, extra_cat, extra_num)."""
-    return df, [], []
+    tells = ["psc_absent", "psc_silence", "psc_corporate_only", "psc_super_secure",
+             "psc_exempt", "is_mill_address", "is_holding_sic", "accounts_dormant"]
+    df["n_tells"] = df[tells].sum(axis=1)
+    df["mill_x_no_individual"] = df["is_mill_address"] * df["psc_has_no_individual"]
+    df["mill_x_silence"] = df["is_mill_address"] * df["psc_silence"]
+    df["dormant_x_corp_only"] = df["accounts_dormant"] * df["psc_corporate_only"]
+    df["holding_x_foreign"] = df["is_holding_sic"] * (df["psc_foreign_corporate"] > 0).astype(int)
+    df["foreign_corp_ratio"] = df["psc_foreign_corporate"] / df["psc_n_corporate"].clip(lower=1)
+    extra_num = ["n_tells", "mill_x_no_individual", "mill_x_silence",
+                 "dormant_x_corp_only", "holding_x_foreign", "foreign_corp_ratio"]
+    return df, [], extra_num
 
 
 CALIBRATION = None  # inner grouped-slice calibration method; None = fit on full train
