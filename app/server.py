@@ -211,16 +211,34 @@ td.no{font:.82rem var(--mono);color:var(--dim)}
 .leg .sq{display:inline-block;width:9px;height:9px;border:2px solid var(--ink);
  vertical-align:-2px;background:var(--paper);padding:0}
 .leg .sq.c{border-color:#2a6db5;border-radius:3px}
-/* ask the register */
-.askwrap{margin-top:36px}
-.alog{max-height:360px;overflow-y:auto}
+/* ask the register: floating panel, native <details> so it works without JS */
+.askfloat{position:fixed;right:18px;bottom:18px;z-index:60;width:min(430px,calc(100vw - 36px))}
+.askfloat summary{list-style:none;cursor:pointer;display:inline-block;float:right;
+ background:var(--ink);color:var(--paper);font:700 .74rem/1 var(--mono);
+ letter-spacing:.18em;text-transform:uppercase;padding:12px 18px;border:2px solid var(--ink);
+ box-shadow:4px 4px 0 #19171240;user-select:none}
+.askfloat summary::before{content:"\\25C8 ";color:var(--red)}
+.askfloat summary::-webkit-details-marker{display:none}
+.askfloat summary:hover{background:var(--red);border-color:var(--red)}
+.askfloat[open] summary{background:var(--red);border-color:var(--red)}
+.askp{clear:both;background:var(--paper);border:2px solid var(--ink);
+ box-shadow:6px 6px 0 #19171240;padding:12px 14px;margin-top:8px;
+ max-height:min(560px,72vh);display:flex;flex-direction:column;
+ background-image:repeating-linear-gradient(var(--paper),var(--paper) 27px,#0000 27px,#0000 28px)}
+.ctxchip{font:.66rem/1.5 var(--mono);color:var(--dim);letter-spacing:.04em;
+ border-left:2px solid var(--red);padding:3px 8px;margin-bottom:8px}
+.ctxchip b{color:var(--red);letter-spacing:.16em;text-transform:uppercase;margin-right:6px}
+.alog{overflow-y:auto;flex:1;min-height:0}
 .alog:empty{display:none}
-.aq{font:700 .8rem/1.4 var(--mono);background:var(--ink);color:var(--paper);
- padding:7px 11px;margin:12px 0 6px;letter-spacing:.03em}
+.aq{font:700 .78rem/1.4 var(--mono);background:var(--ink);color:var(--paper);
+ padding:6px 10px;margin:10px 0 6px;letter-spacing:.03em}
 .aq::before{content:"Q // ";color:#cfc8b8}
-.aa{font:.9rem/1.62 Georgia,serif;white-space:pre-wrap;padding:2px 0 10px;
+.aa{font:.86rem/1.6 Georgia,serif;white-space:pre-wrap;padding:2px 0 10px;
  border-bottom:1px solid var(--faint)}
-form.askf{display:flex;gap:0;border:2px solid var(--ink);margin-top:10px}
+form.askf{display:flex;gap:0;border:2px solid var(--ink);margin-top:10px;flex-shrink:0}
+form.askf input[type=text]{padding:10px 11px;font-size:.85rem}
+form.askf button{padding:0 14px}
+@media print{.askfloat{display:none}}
 .foot{color:var(--dim);font:.68rem/1.6 var(--mono);letter-spacing:.06em;margin-top:44px;
  border-top:1px solid var(--ink);padding-top:12px;text-transform:uppercase}
 """
@@ -247,6 +265,16 @@ document.querySelectorAll('.hist i,.phist i').forEach(function(b){
   var t=(b.getAttribute('data-c')||'').split(' · ');
   tipShow([[t[0]||'',t[1]||'']],ev.clientX,ev.clientY);});
  b.addEventListener('pointerleave',tipHide);});
+
+// the graphs point the conversation: clicking an owner square retargets the chat
+function setAskCtx(txt){
+ var f=document.querySelector('form.askf'),chip=document.getElementById('askctx');
+ if(!f)return;
+ f.ctx.value=txt;
+ if(chip){chip.hidden=false;chip.querySelector('span').textContent=txt;}
+ var d=document.getElementById('ask');if(d)d.open=true;
+ if(f.q&&!f.q.disabled)f.q.focus();
+}
 
 document.querySelectorAll('form.askf').forEach(function(f){
  f.addEventListener('submit',function(ev){
@@ -393,9 +421,14 @@ document.querySelectorAll('figure.web').forEach(function(fig){
  svg.addEventListener('click',function(ev){
   if(moved>3){ev.preventDefault();ev.stopPropagation();moved=0;return;}
   var i=nearest(toWorld(ev.clientX,ev.clientY));
-  if(i!==null&&i>=NO){var el=dEl[i-NO],a=el&&el.parentElement,
+  if(i===null)return;
+  if(i>=NO){var el=dEl[i-NO],a=el&&el.parentElement,
     h=a&&(a.getAttribute('href')||(a.href&&a.href.baseVal));
-   if(h){ev.preventDefault();ev.stopPropagation();window.open(h,'_blank');}}},true);
+   if(h){ev.preventDefault();ev.stopPropagation();window.open(h,'_blank');}}
+  else{ev.preventDefault();ev.stopPropagation();
+   var t=G.o[i].tip||[],parts=[];
+   t.forEach(function(r){parts.push((r[0]?r[0]+': ':'')+r[1]);});
+   setAskCtx('the graph node just clicked — '+parts.join(' · '));}},true);
 
  if(G.f!==null&&G.f!==undefined){
   // frame the focus company and its owners, with margin and enough of the web
@@ -469,7 +502,7 @@ def fired(row):
     return out
 
 
-def page(bd, body):
+def page(bd, body, ask_ctx="", ask_pairs=None, ask_open=False):
     n = len(U["df"]) if U["df"] is not None else 0
     return (f"<!doctype html><html><head><meta charset=utf-8>"
             f"<meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -491,7 +524,8 @@ def page(bd, body):
             f"name to search, or draw one at random.</p>{body}"
             f"<div class=foot>Empty Chair &middot; disclosure shape only, never intent &middot; "
             f"PU-labelled, scores are a lower bound &middot; built on Hopsworks</div>"
-            f"</div><script>{JS}</script></body></html>")
+            f"</div>{ask_widget(bd, ctx=ask_ctx, pairs=ask_pairs, open_=ask_open)}"
+            f"<script>{JS}</script></body></html>")
 
 
 def _hist_bars(counts, edges):
@@ -797,20 +831,26 @@ def exec_tool(name, args):
     return fn(args) if fn else _j({"error": f"unknown tool {name}"})
 
 
-def ask_box(bd, ctx="", pairs=None):
+def ask_widget(bd, ctx="", pairs=None, open_=False):
+    """Floating ask-the-register panel. A native <details> pinned bottom-right, so
+    it opens and posts without JavaScript; the JS layer streams answers and lets the
+    graphs update the context chip live."""
     rows = "".join(f"<div class=aq>{esc(q)}</div><div class=aa>{esc(a)}</div>"
                    for q, a in (pairs or []))
-    return (f"<div class=askwrap id=ask><h2 class=sec>Ask the register</h2>"
-            f"<p class=hint>Answers are drawn live from the register through tools: this "
-            f"company, its web, the population. Same ethic as everything here: signal, "
-            f"not verdict.</p>"
+    return (f"<details class=askfloat id=ask{' open' if open_ else ''}>"
+            f"<summary>Ask the register</summary><div class=askp>"
+            f"<div class=ctxchip id=askctx {'hidden' if not ctx else ''}>"
+            f"<b>on screen</b> <span>{esc(ctx)}</span></div>"
             f"<div class=alog>{rows}</div>"
             f"<form class=askf method=post action='{bd}/ask'>"
             f"<input type=hidden name=ctx value='{esc(ctx)}'>"
             f"<input type=hidden name=hist value='{esc(json.dumps(pairs or []))}'>"
             f"<input type=text name=q maxlength=300 autocomplete=off "
-            f"placeholder='WHO SHARES OWNERS WITH THIS COMPANY? HOW RARE IS ITS SHAPE?'>"
-            f"<button>Ask</button></form></div>")
+            f"placeholder='ASK ABOUT WHAT YOU SEE'>"
+            f"<button>Ask</button></form>"
+            f"<div class=hint style='margin:6px 0 0'>Answers come from live register tools. "
+            f"Click any owner square in a graph to point the conversation at it. "
+            f"Signal, not verdict.</div></div></details>")
 
 
 def evidence_card(row):
@@ -1146,8 +1186,12 @@ async def network(req: Request):
             + "<h2 class=sec>Isolated nests &mdash; hottest first</h2>"
             "<div class=grid>"
             + "".join(web_fig(bd, w, small=True) for w in U.get("wheels") or [])
-            + "</div>" + ask_box(bd))
-    return HTMLResponse(page(bd, body))
+            + "</div>")
+    top_web = U["webs"][0] if U.get("webs") else None
+    ctx = "the concealment webs page: shared-owner graphs over the top 1%"
+    if top_web:
+        ctx += f"; the largest web joins {top_web['K']} owners over {top_web['n_comp']} companies"
+    return HTMLResponse(page(bd, body, ask_ctx=ctx))
 
 
 @app.get("/random")
@@ -1167,13 +1211,17 @@ async def home(req: Request):
     bd = base(req)
     if U["error"]:
         return HTMLResponse(page(bd, f"<div class=band>load error: {esc(U['error'])}</div>"))
-    return HTMLResponse(page(bd, top_table(bd, U["top"]) + ask_box(bd)))
+    return HTMLResponse(page(bd, top_table(bd, U["top"]),
+                             ask_ctx="the landing page: score distribution over 5.7M UK "
+                                     "companies and the highest-ranked table"))
 
 
 def _result(bd, row, review_html):
+    pctl, _, _ = severity(row["pct_rank"])
+    ctx = (f"the audit page for {row['company_name']} (company number "
+           f"{row['company_number']}), ranked at the {ordinal(pctl)} percentile")
     return page(bd, f"<div class=stage>{evidence_card(row)}{rail(bd, row, review_html)}</div>"
-                    f"{chair_fig(bd, row)}{ego_fig(bd, row)}"
-                    f"{ask_box(bd, ctx=row['company_number'])}")
+                    f"{chair_fig(bd, row)}{ego_fig(bd, row)}", ask_ctx=ctx)
 
 
 @app.post("/audit", response_class=HTMLResponse)
@@ -1253,7 +1301,8 @@ async def ask_page(req: Request, q: str = Form(...), ctx: str = Form(default="")
             ans = A.run_ask(q, pairs, ctx.strip() or None, ENGINE["client"], exec_tool)
         except Exception as e:
             ans = f"ask error: {e}"
-    return HTMLResponse(page(bd, ask_box(bd, ctx=ctx, pairs=pairs + [(q, ans)])))
+    return HTMLResponse(page(bd, top_table(bd, U["top"]), ask_ctx=ctx,
+                             ask_pairs=pairs + [(q, ans)], ask_open=True))
 
 
 @app.post("/ask/stream")

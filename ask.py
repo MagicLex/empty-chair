@@ -78,7 +78,7 @@ def _messages(question, history, ctx):
     for q, a in history[-MAX_HISTORY:]:
         msgs.append({"role": "user", "content": str(q)[:600]})
         msgs.append({"role": "assistant", "content": str(a)[:2000]})
-    lead = f"[The user is currently viewing company number {ctx}.]\n" if ctx else ""
+    lead = f"[On screen right now: {str(ctx)[:300]}]\n" if ctx else ""
     msgs.append({"role": "user", "content": lead + question[:600]})
     return msgs
 
