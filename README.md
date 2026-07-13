@@ -149,9 +149,13 @@ hover, tooltips, and draggable nodes over a spring simulation seeded from the se
 layout. The rank comes from the ML model; the note only explains it, signal not
 verdict.
 
-Every page carries **Ask the register**: a streaming conversational layer
-(`ask.py`) where the model answers only through deterministic tools over the live
-data (company lookup, ownership webs, name and owner search, population stats).
-No embeddings, no invented numbers; if a tool returns nothing, the answer says so.
-The same signal-not-verdict rules bind every reply. Without JavaScript it degrades
-to a full-page round trip.
+Every page carries **Ask the register**, a full-height chat drawer pinned to the
+right edge. The model (`ask.py`) answers only through deterministic tools over the
+live data: company lookup, ownership webs, name and owner search, population
+stats. No embeddings, no invented numbers; if a tool returns nothing, the answer
+says so. Tokens stream over a websocket (the platform proxy buffers plain HTTP
+streaming) with each tool call shown as a status row. The chat is contextual: it
+knows which page is open, and clicking any owner square in a graph points the
+conversation at that owner. Replies interpret the figures concretely, percentile
+arithmetic and tell base rates included, under the same never-accuse constraints.
+Without JavaScript it degrades to a full-page round trip.
