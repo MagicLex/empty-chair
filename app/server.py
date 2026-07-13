@@ -492,7 +492,7 @@ document.querySelectorAll('figure.web').forEach(function(fig){
   else{ev.preventDefault();ev.stopPropagation();
    var t=G.o[i].tip||[],parts=[];
    t.forEach(function(r){parts.push((r[0]?r[0]+': ':'')+r[1]);});
-   setAskCtx('the graph node just clicked — '+parts.join(' · '));}},true);
+   setAskCtx('the graph node just clicked: '+parts.join(' · '));}},true);
 
  if(G.f!==null&&G.f!==undefined){
   // frame the focus company and its owners, with margin and enough of the web
@@ -573,7 +573,7 @@ def page(bd, body, ask_ctx="", ask_pairs=None, ask_open=False):
             f"<title>EMPTY CHAIR &middot; register of concealment shape</title>"
             f"<style>{CSS}</style></head><body><div class=wrap>"
             f"<div class=mast><h1>Empty Chair</h1>"
-            f"<div class=reg>Register of concealment shape &mdash; United Kingdom companies</div></div>"
+            f"<div class=reg>Register of concealment shape &middot; United Kingdom companies</div></div>"
             f"<div class=rule><span>Model v{MODEL_VERSION}</span><span>{n:,} companies on file</span>"
             f"<span>Signal, not verdict</span></div>"
             f"{BAND}"
@@ -603,7 +603,7 @@ def _hist_bars(counts, edges):
 
 def hist_html():
     counts, edges = U["hist"]
-    return ("<h2 class=sec>Score distribution &mdash; 5.7M companies</h2>"
+    return ("<h2 class=sec>Score distribution: 5.7M companies</h2>"
             f"<div class=hist>{_hist_bars(counts, edges)}</div>"
             "<div class=histx><span>0.0 &nbsp;clean</span><span>0.5 &nbsp;flag line</span>"
             "<span>1.0 &nbsp;concealment shape</span></div>")
@@ -671,7 +671,7 @@ def fingerprint(row):
                     f"<span class=fpl>{esc(label)}</span>"
                     f"<span class=fpb><i style='width:{max(1.5, rate / mx * 100):.1f}%'></i></span>"
                     f"<span class=fpn>{rate * 100:.1f}%</span></div>")
-    return ("<div class=lbl>Disclosure tells on file &mdash; and how common each is</div>"
+    return ("<div class=lbl>Disclosure tells on file, and how common each is</div>"
             + "".join(rows)
             + "<p class=hint>Dark rows fired for this company. The bar is how much of the "
               "5.7M-company register shares that tell: the shorter the bar, the rarer "
@@ -1246,7 +1246,7 @@ async def network(req: Request):
     if nests is None or not len(nests):
         return HTMLResponse(page(bd, "<p class=note>The linkage graph is not built yet. "
                                      "Run <b>build-linkage</b> to generate concealment nests.</p>"))
-    body = ("<h2 class=sec>Concealment webs &mdash; owners bridged by shared companies</h2>"
+    body = ("<h2 class=sec>Concealment webs: owners bridged by shared companies</h2>"
             "<p class=note><b>NOT A LIST OF WRONGDOERS.</b> Controlling many companies with this "
             "shape is normal: property developers run one company per building, REITs and "
             "corporate-secretary agents appear on hundreds by trade. Nobody here is in the leaks; "
@@ -1258,7 +1258,7 @@ async def network(req: Request):
             "Click a dot to open that company in a new tab.</p>"
             + legend()
             + "".join(web_fig(bd, w) for w in U.get("webs") or [])
-            + "<h2 class=sec>Isolated nests &mdash; hottest first</h2>"
+            + "<h2 class=sec>Isolated nests: hottest first</h2>"
             "<div class=grid>"
             + "".join(web_fig(bd, w, small=True) for w in U.get("wheels") or [])
             + "</div>")

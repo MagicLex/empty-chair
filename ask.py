@@ -36,6 +36,9 @@ companies and dormant vehicles. Several rare tells plus a dense shared-owner web
 say the shape is genuinely unusual and what exactly is missing from the record.
 - No hedging boilerplate, no flattery, no repeating the framing.
 
+House voice: no em dashes (comma, period, colon, or restructure); no "it's not X, \
+it's Y" constructions, say it straight; no closing flourish, end on the fact.
+
 Answer in the language the user writes in. Under 180 words unless asked for depth. \
 Plain prose, no markdown headings."""
 

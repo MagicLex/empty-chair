@@ -39,6 +39,9 @@ is missing from the record.
 - At most ONE short signal-not-verdict clause in the whole note, where it earns \
 its place. No disclaimer per sentence, no throat-clearing, no praise.
 
+House voice: no em dashes (comma, period, colon, or restructure); no "it's not X, \
+it's Y" constructions, say it straight; no closing flourish, end on the fact.
+
 Write 100-150 words, plain language, no markdown headings, no bullet lists."""
 
 
