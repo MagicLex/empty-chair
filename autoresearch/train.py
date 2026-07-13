@@ -101,7 +101,7 @@ def add_features(df: pd.DataFrame):
     return df, [], []
 
 
-CALIBRATION = "isotonic"  # inner grouped-slice calibration method
+CALIBRATION = None  # inner grouped-slice calibration method; None = fit on full train
 
 
 # ------------------------------------------------------------------------- main
@@ -126,15 +126,16 @@ def main():
     ytr, yte = y[tr], y[te]
     print(f"grouped split: train {len(tr)} / test {len(te)}")
 
-    # fit on inner grouped slice, calibrate on held slice (as train_chair.py)
-    gss2 = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=1)
-    fit_i, cal_i = next(gss2.split(Xtr, ytr, groups[tr]))
     pipe = build_model(cols_cat, cols_num)
-    pipe.fit(Xtr.iloc[fit_i][cols_cat + cols_num], ytr[fit_i])
     if CALIBRATION:
+        # fit on inner grouped slice, calibrate on held slice (as train_chair.py)
+        gss2 = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=1)
+        fit_i, cal_i = next(gss2.split(Xtr, ytr, groups[tr]))
+        pipe.fit(Xtr.iloc[fit_i][cols_cat + cols_num], ytr[fit_i])
         model = CalibratedClassifierCV(FrozenEstimator(pipe), method=CALIBRATION)
         model.fit(Xtr.iloc[cal_i][cols_cat + cols_num], ytr[cal_i])
     else:
+        pipe.fit(Xtr[cols_cat + cols_num], ytr)
         model = pipe
     score = model.predict_proba(Xte[cols_cat + cols_num])[:, 1]
     ap = average_precision_score(yte, score)
