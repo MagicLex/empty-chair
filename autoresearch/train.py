@@ -116,6 +116,28 @@ def add_features(df: pd.DataFrame):
 
 CALIBRATION = None  # inner grouped-slice calibration method; None = fit on full train
 
+# grouped OOF target encoding: train labels only, GroupKFold inside the train slice
+TARGET_ENCODE = ["post_area", "sic_section"]
+TE_SMOOTH = 20
+
+
+def target_encode(Xtr, Xte, ytr, groups_tr):
+    from sklearn.model_selection import GroupKFold
+    prior = ytr.mean()
+    out = []
+    for c in TARGET_ENCODE:
+        oof = np.full(len(Xtr), prior)
+        for fi, vi in GroupKFold(n_splits=5).split(Xtr, ytr, groups_tr):
+            agg = pd.Series(ytr[fi]).groupby(Xtr[c].iloc[fi].values).agg(["sum", "count"])
+            smooth = (agg["sum"] + TE_SMOOTH * prior) / (agg["count"] + TE_SMOOTH)
+            oof[vi] = Xtr[c].iloc[vi].map(smooth).fillna(prior).values
+        Xtr[c + "_te"] = oof
+        agg = pd.Series(ytr).groupby(Xtr[c].values).agg(["sum", "count"])
+        smooth = (agg["sum"] + TE_SMOOTH * prior) / (agg["count"] + TE_SMOOTH)
+        Xte[c + "_te"] = Xte[c].map(smooth).fillna(prior).values
+        out.append(c + "_te")
+    return out
+
 
 # ------------------------------------------------------------------------- main
 
@@ -135,9 +157,12 @@ def main():
     cols_cat = CAT + extra_cat
     cols_num = NUM + extra_num
 
-    Xtr, Xte = df.iloc[tr], df.iloc[te]
+    Xtr, Xte = df.iloc[tr].copy(), df.iloc[te].copy()
     ytr, yte = y[tr], y[te]
     print(f"grouped split: train {len(tr)} / test {len(te)}")
+
+    if TARGET_ENCODE:
+        cols_num = cols_num + target_encode(Xtr, Xte, ytr, groups[tr])
 
     pipe = build_model(cols_cat, cols_num)
     if CALIBRATION:
