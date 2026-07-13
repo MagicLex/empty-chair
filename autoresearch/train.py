@@ -90,7 +90,7 @@ def build_model(cols_cat, cols_num):
     from sklearn.ensemble import VotingClassifier
     def lgbm(seed):
         return LGBMClassifier(
-            n_estimators=1000, learning_rate=0.03, num_leaves=31,
+            n_estimators=1500, learning_rate=0.02, num_leaves=31,
             reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
             colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
             random_state=seed, n_jobs=3, verbose=-1)
