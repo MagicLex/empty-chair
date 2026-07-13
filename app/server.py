@@ -267,6 +267,11 @@ document.querySelectorAll('.hist i,.phist i').forEach(function(b){
  b.addEventListener('pointerleave',tipHide);});
 
 // the graphs point the conversation: clicking an owner square retargets the chat
+var askD=document.getElementById('ask');
+if(askD)askD.addEventListener('toggle',function(){
+ var log=askD.querySelector('.alog');
+ if(askD.open&&log)log.scrollTop=log.scrollHeight;});
+
 function setAskCtx(txt){
  var f=document.querySelector('form.askf'),chip=document.getElementById('askctx');
  if(!f)return;
@@ -285,6 +290,7 @@ document.querySelectorAll('form.askf').forEach(function(f){
   var uq=document.createElement('div');uq.className='aq';uq.textContent=q;log.appendChild(uq);
   var ua=document.createElement('div');ua.className='aa';
   ua.textContent='consulting the register…';log.appendChild(ua);
+  log.scrollTop=log.scrollHeight;
   f.q.value='';f.q.disabled=true;var first=true;
   function done(){f.q.disabled=false;f.q.focus();
    var h=[];try{h=JSON.parse(f.hist.value)||[];}catch(e){}
@@ -295,8 +301,9 @@ document.querySelectorAll('form.askf').forEach(function(f){
    function pump(){return rd.read().then(function(x){
     if(x.done){done();return;}
     if(first){ua.textContent='';first=false;}
+    var stick=log.scrollHeight-log.scrollTop-log.clientHeight<60;
     ua.textContent+=dec.decode(x.value,{stream:true});
-    log.scrollTop=log.scrollHeight;
+    if(stick)log.scrollTop=log.scrollHeight;
     return pump();});}
    return pump();
   }).catch(function(e){ua.textContent+='\n[error: '+e+']';done();});
