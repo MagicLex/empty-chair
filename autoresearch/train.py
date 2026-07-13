@@ -117,7 +117,7 @@ def add_features(df: pd.DataFrame):
 CALIBRATION = None  # inner grouped-slice calibration method; None = fit on full train
 
 # grouped OOF target encoding: train labels only, GroupKFold inside the train slice
-TARGET_ENCODE = ["post_area", "sic_section"]
+TARGET_ENCODE = ["post_area", "sic_section", "sic_code"]
 TE_SMOOTH = 20
 
 
