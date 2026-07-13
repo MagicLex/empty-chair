@@ -104,6 +104,16 @@ app = FastAPI(lifespan=lifespan)
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 
+# streamed responses must dodge the gzip middleware (it batches chunks) and tell
+# any proxy on the path not to buffer, or tokens arrive in one burst at the end
+STREAM_HEADERS = {"Content-Encoding": "identity", "X-Accel-Buffering": "no",
+                  "Cache-Control": "no-cache"}
+
+
+def stream_response(gen):
+    return StreamingResponse(gen, media_type="text/plain; charset=utf-8",
+                             headers=STREAM_HEADERS)
+
 CSS = """
 *{box-sizing:border-box}
 :root{--paper:#efe9dc;--ink:#191712;--faint:#78716031;--dim:#6a6355;--red:#a8291c;
@@ -233,11 +243,15 @@ td.no{font:.82rem var(--mono);color:var(--dim)}
 .aq{font:700 .78rem/1.4 var(--mono);background:var(--ink);color:var(--paper);
  padding:6px 10px;margin:10px 0 6px;letter-spacing:.03em}
 .aq::before{content:"Q // ";color:#cfc8b8}
-.aa{font:.86rem/1.6 Georgia,serif;white-space:pre-wrap;padding:2px 0 10px;
- border-bottom:1px solid var(--faint)}
+.aa{font:.86rem/1.6 Georgia,serif;white-space:pre-wrap;overflow-wrap:break-word;
+ padding:2px 0 10px;border-bottom:1px solid var(--faint)}
+.alog{overscroll-behavior:contain}
 form.askf{display:flex;gap:0;border:2px solid var(--ink);margin-top:10px;flex-shrink:0}
-form.askf input[type=text]{padding:10px 11px;font-size:.85rem}
+form.askf input[type=text]{padding:10px 11px;font-size:.85rem;min-width:0}
 form.askf button{padding:0 14px}
+form.askf .aclr{background:var(--paper);color:var(--dim);border:0;border-left:2px solid var(--ink);
+ font-size:.9rem;padding:0 12px}
+form.askf .aclr:hover{background:var(--red);color:#fff}
 @media print{.askfloat{display:none}}
 .foot{color:var(--dim);font:.68rem/1.6 var(--mono);letter-spacing:.06em;margin-top:44px;
  border-top:1px solid var(--ink);padding-top:12px;text-transform:uppercase}
@@ -280,6 +294,12 @@ function setAskCtx(txt){
  var d=document.getElementById('ask');if(d)d.open=true;
  if(f.q&&!f.q.disabled)f.q.focus();
 }
+
+document.querySelectorAll('form.askf .aclr').forEach(function(b){
+ b.addEventListener('click',function(){
+  var f=b.closest('form');
+  f.parentElement.querySelector('.alog').textContent='';
+  f.hist.value='[]';f.q.value='';f.q.focus();});});
 
 document.querySelectorAll('form.askf').forEach(function(f){
  f.addEventListener('submit',function(ev){
@@ -854,7 +874,8 @@ def ask_widget(bd, ctx="", pairs=None, open_=False):
             f"<input type=hidden name=hist value='{esc(json.dumps(pairs or []))}'>"
             f"<input type=text name=q maxlength=300 autocomplete=off "
             f"placeholder='ASK ABOUT WHAT YOU SEE'>"
-            f"<button>Ask</button></form>"
+            f"<button>Ask</button>"
+            f"<button type=button class=aclr title='clear the conversation'>&#10005;</button></form>"
             f"<div class=hint style='margin:6px 0 0'>Answers come from live register tools. "
             f"Click any owner square in a graph to point the conversation at it. "
             f"Signal, not verdict.</div></div></details>")
@@ -1259,7 +1280,7 @@ async def dossier(req: Request):
     row = resolve(req.query_params.get("q"))
     client = ENGINE["client"]
     if row is None or client is None:
-        return StreamingResponse(iter(["dossier unavailable"]), media_type="text/plain")
+        return stream_response(iter(["dossier unavailable"]))
 
     def gen():
         try:
@@ -1268,7 +1289,7 @@ async def dossier(req: Request):
                 yield delta
         except Exception as e:
             yield f"\n[dossier error: {e}]"
-    return StreamingResponse(gen(), media_type="text/plain")
+    return stream_response(gen())
 
 
 ASK_GAP = 3.0
@@ -1317,12 +1338,10 @@ async def ask_stream(req: Request, q: str = Form(...), ctx: str = Form(default="
                      hist: str = Form(default="[]")):
     """Progressive enhancement: streams tool status lines and answer tokens."""
     if _throttled(req):
-        return StreamingResponse(iter(["One question every few seconds, please."]),
-                                 media_type="text/plain")
+        return stream_response(iter(["One question every few seconds, please."]))
     client = ENGINE["client"]
     if client is None:
-        return StreamingResponse(iter(["The conversational layer is offline."]),
-                                 media_type="text/plain")
+        return stream_response(iter(["The conversational layer is offline."]))
     pairs = _ask_pairs(hist)
 
     def gen():
@@ -1331,7 +1350,7 @@ async def ask_stream(req: Request, q: str = Form(...), ctx: str = Form(default="
                 yield delta
         except Exception as e:
             yield f"\n[ask error: {e}]"
-    return StreamingResponse(gen(), media_type="text/plain")
+    return stream_response(gen())
 
 
 class StripForwardedPrefix:
