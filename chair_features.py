@@ -198,7 +198,9 @@ CONCEALMENT_FLAGS = {
 # the te_maps ship inside the model artifact (te_maps.json).
 DERIVED_NUM = ["n_tells", "mill_x_no_individual", "mill_x_silence",
                "dormant_x_corp_only", "holding_x_foreign", "foreign_corp_ratio"]
-TE_COLS = ["post_area", "sic_section", "sic_code"]
+# sic_code dropped after the v5 bias audit: encoding full SIC let the model rank
+# on sector directly and the universe top 1% collapsed to real estate (99.3%).
+TE_COLS = ["post_area", "sic_section"]
 _TELLS = ["psc_absent", "psc_silence", "psc_corporate_only", "psc_super_secure",
           "psc_exempt", "is_mill_address", "is_holding_sic", "accounts_dormant"]
 
@@ -214,8 +216,11 @@ def derive_features(df, te_maps=None):
     df["foreign_corp_ratio"] = df["psc_foreign_corporate"] / df["psc_n_corporate"].clip(lower=1)
     if te_maps:
         prior = te_maps["__prior__"]
-        for c in TE_COLS:
-            df[c + "_te"] = df[c].astype(str).map(te_maps[c]).fillna(prior)
+        # the artifact's te_maps.json says which columns were encoded, so older
+        # models (e.g. v5 with sic_code) keep scoring after TE_COLS changes
+        for c in te_maps:
+            if c != "__prior__":
+                df[c + "_te"] = df[c].astype(str).map(te_maps[c]).fillna(prior)
     return df
 
 

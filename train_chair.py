@@ -151,6 +151,8 @@ def evaluate(name, y, score):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-register", action="store_true")
+    ap.add_argument("--seeds", type=int, default=10,
+                    help="LGBMs in the soft-vote; 1 = the fast single-seed variant")
     ap.add_argument("--no-structure", action="store_true",
                     help="ablation: drop the property/holding/mill structure confounds")
     args = ap.parse_args()
@@ -187,7 +189,7 @@ def main():
     Xte = derive_features(df.iloc[te].copy())
     te_maps = fit_target_encoding(Xtr, ytr, groups[tr], Xte)
     cols_num = NUM + DERIVED_NUM + [c + "_te" for c in TE_COLS]
-    pipe = make_pipeline(CAT, cols_num)
+    pipe = make_pipeline(CAT, cols_num, seeds=args.seeds)
     pipe.fit(Xtr[CAT + cols_num], ytr)
     score_full = pipe.predict_proba(Xte[CAT + cols_num])[:, 1]
     results["full"] = evaluate("full", yte, score_full)
