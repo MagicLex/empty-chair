@@ -57,6 +57,9 @@ def _brief(name: str, pct_rank: float, flags: list[dict], meta: dict) -> str:
         f"Company: {name}",
         f"Concealment-shape rank: top {max(top,1)}% of UK companies "
         f"(percentile {pct_rank:.3f}; higher = more like later-revealed concealment).",
+        (f"IMPORTANT: this company IS in the label set, name-matched to {meta['on_record']}. "
+         "Its rank is not a model discovery; say so plainly, and note the name match itself "
+         "can be a false positive.") if meta.get("on_record") else "",
         f"Register population: {pop:,} companies." if pop else "",
         f"Incorporated: {meta.get('incorporation_year','?')}, status: {meta.get('company_status','?')}, "
         f"SIC: {meta.get('sic_code','?')}.",

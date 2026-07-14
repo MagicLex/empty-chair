@@ -66,6 +66,17 @@ def _load():
     U["hist"] = (counts.tolist(), [round(float(e), 2) for e in edges])
     # population base rate of each tell, for the audit-page fingerprint
     U["rates"] = {k: float(df[k].mean()) for k in CONCEALMENT_FLAGS if k in df.columns}
+    # the labeled companies (already revealed in ICIJ / OpenSanctions): kept in the
+    # register but MARKED everywhere, their rank is not a model discovery
+    try:
+        import hopsworks
+        rev = hopsworks.login().get_feature_store().get_feature_group("revealed_owner", 1).read()
+        U["revealed"] = {str(r): (str(s), str(c)) for r, s, c in
+                         zip(rev["company_number"], rev["source"], rev["match_confidence"])}
+        print(f"revealed label set: {len(U['revealed'])}", flush=True)
+    except Exception as e:
+        U["revealed"] = {}
+        print(f"no revealed set: {e}", flush=True)
     try:
         U["nests"] = pd.read_parquet(os.path.join(CODE_DIR, "data", "linkage.parquet"))
         _build_webs()
@@ -132,6 +143,10 @@ a:hover{background:var(--ink);color:var(--paper)}
  text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--ink);padding:6px 0;margin-bottom:22px}
 .note{font-size:.9rem;margin:0 0 22px;padding-left:14px;border-left:2px solid var(--red)}
 .note b{font-family:var(--mono);font-size:.82rem;letter-spacing:.04em}
+.note.onrec{border-left:none;background:var(--ink);color:var(--paper);padding:12px 16px}
+.note.onrec b{color:#fff}
+.onrec-tag{font:700 .6rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+ background:var(--ink);color:var(--paper);padding:2px 6px;white-space:nowrap}
 form.q{display:flex;gap:0;border:2px solid var(--ink);margin:0 0 8px}
 input[type=text]{flex:1;min-width:180px;background:#0000;color:var(--ink);border:0;
  padding:13px 14px;font:1rem var(--mono)}
@@ -619,8 +634,10 @@ def top_table(bd, top):
     rows = []
     for _, r in top.iterrows():
         pctl, band, _ = severity(r["pct_rank"])
+        rec = " <b class=onrec-tag title='already in the label set (ICIJ / OpenSanctions)'>on the record</b>" \
+            if on_record(r["company_number"]) else ""
         rows.append(
-            f"<tr><td><a href='{bd}/audit?q={esc(r['company_number'])}'>{esc(r['company_name'])}</a></td>"
+            f"<tr><td><a href='{bd}/audit?q={esc(r['company_number'])}'>{esc(r['company_name'])}</a>{rec}</td>"
             f"<td class=no>{esc(r['company_number'])}</td>"
             f"<td class=n>{ordinal(pctl)}</td>"
             f"<td class=n>{int(r['n_flags'])}</td></tr>")
@@ -657,7 +674,32 @@ def legend():
             "<span><b class=sq></b> person owner</span>"
             "<span><b class='sq c'></b> corporate owner</span>"
             "<span>&#9711; hollow = dissolved</span>"
-            "<span style='color:var(--red)'>&#9472; shared company</span></div>")
+            "<span style='color:var(--red)'>&#9472; shared company</span>"
+            "<span>&#9676; dashed ring = on the record (label set)</span></div>")
+
+
+_REC_SOURCES = {"icij-entity": "the ICIJ Offshore Leaks (entity match)",
+                "icij-officer-corp": "the ICIJ Offshore Leaks (corporate-officer match)",
+                "opensanctions": "the OpenSanctions consolidated list"}
+
+
+def on_record(num):
+    """(source description, match confidence) if the company is in the label set."""
+    rec = (U.get("revealed") or {}).get(str(num))
+    if not rec:
+        return None
+    return _REC_SOURCES.get(rec[0], rec[0]), rec[1]
+
+
+def onrec_band(row):
+    rec = on_record(row["company_number"])
+    if not rec:
+        return ""
+    return (f"<p class='note onrec'><b>ALREADY ON THE RECORD.</b> This company is in the "
+            f"label set: its name matches {rec[0]} (match confidence: {esc(rec[1])}). The "
+            f"rank below describes its disclosure shape; it is not a model discovery, "
+            f"companies like it are what the model trained on. The name match itself can "
+            f"be a false positive.</p>")
 
 
 def fingerprint(row):
@@ -761,12 +803,16 @@ def chair_fig(bd, row):
              [["holding", "holding / management / trust activity code"],
               ["rarity", pct("is_holding_sic")]], h=12, style=FAINT)
     K = len(o)
+    rec = on_record(row["company_number"])
+    tip = [[f"{score:.2f}", row["company_name"]],
+           [ordinal(pctl), f"more concealment-shaped than {pctl}% of UK companies"],
+           [str(row.get("company_status") or "?"), f"SIC {row.get('sic_code') or '?'}"]]
+    if rec:
+        tip.append(["on the record", f"already in the label set via {rec[0]}"])
     d = [{"x": 300, "y": 172, "num": row["company_number"], "name": row["company_name"],
           "score": round(score, 3), "active": _is_active(row.get("company_status")),
           "status": str(row.get("company_status") or ""), "bridge": False, "r": 15,
-          "tip": [[f"{score:.2f}", row["company_name"]],
-                  [ordinal(pctl), f"more concealment-shaped than {pctl}% of UK companies"],
-                  [str(row.get("company_status") or "?"), f"SIC {row.get('sic_code') or '?'}"]]}]
+          "rec": bool(rec), "tip": tip}]
     edges = [(K if a == "C" else a, b, c) for a, b, c in E]
     xs = [n["x"] for n in o + d]
     ys = [n["y"] for n in o + d]
@@ -812,12 +858,15 @@ def _tool_lookup_company(args):
     tells = [{"tell": label, "population_rate_pct": round(rates.get(k, 0) * 100, 1)}
              for k, label in CONCEALMENT_FLAGS.items()
              if row.get(k) is not None and int(row.get(k, 0) or 0) > 0]
+    rec = on_record(row["company_number"])
     return _j({"name": row["company_name"], "number": row["company_number"],
                "score_0to1": round(float(row["score"]), 3), "percentile": pctl,
                "band": band, "fired_tells": tells,
                "incorporated": row.get("incorporation_year"),
                "status": row.get("company_status"), "sic": row.get("sic_code"),
-               "in_scored_nest": row["company_number"] in (U.get("comp_of") or {})})
+               "in_scored_nest": row["company_number"] in (U.get("comp_of") or {}),
+               "already_on_record": (f"in the label set via {rec[0]}, match confidence "
+                                     f"{rec[1]}; its rank is not a model discovery") if rec else False})
 
 
 def _tool_ownership_web(args):
@@ -871,6 +920,7 @@ def _tool_register_stats(args):
                "share_scoring_above_0_5_pct": round(float((df["score"] > .5).mean()) * 100, 2),
                "scored_nests": int(len(U["nests"])) if U.get("nests") is not None else 0,
                "linked_webs_rendered": len(U.get("webs") or []),
+               "companies_already_on_record": len(U.get("revealed") or {}),
                "note": "scores are relative concealment-shape ranks, signal not verdict"})
 
 
@@ -953,6 +1003,8 @@ def rail(bd, row, review_html):
 def meta_of(row):
     m = {k: row.get(k) for k in ("incorporation_year", "company_status", "sic_code")}
     m["population"] = int(len(U["df"])) if U.get("df") is not None else None
+    rec = on_record(row["company_number"])
+    m["on_record"] = rec[0] if rec else None
     return m
 
 
@@ -1062,7 +1114,8 @@ def _web_layout(nest_idxs, mem, nests):
     def dot(p, num, c, bridge):
         st = _status_of(num)
         return {"x": float(p[0]), "y": float(p[1]), "num": num, "name": c["name"],
-                "score": c["score"], "active": _is_active(st), "status": st, "bridge": bridge}
+                "score": c["score"], "active": _is_active(st), "status": st,
+                "bridge": bridge, "rec": num in (U.get("revealed") or {})}
 
     # edges carry GLOBAL node indices: owners are 0..K-1, dots are K+j
     dots, edges = [], []
@@ -1184,6 +1237,8 @@ def _dot_tip(d):
            ["active" if d["active"] else "dissolved", d["status"] or ""]]
     if d["bridge"]:
         tip.append(["shared", "held by more than one owner here"])
+    if d.get("rec"):
+        tip.append(["on the record", "already in the label set (ICIJ / OpenSanctions), its rank is not a discovery"])
     return tip
 
 
@@ -1206,10 +1261,13 @@ def web_fig(bd, w, focus=None, small=False, cap=None):
     focus_i = None
     for j, d in enumerate(w["dots"]):
         rr = d.get("r") or 4 + 5 * d["score"]
+        dash = ""
         if d["active"]:
             fill, stroke, sw = ramp_of(d["score"]), ("#a8291c" if d["bridge"] else "none"), (1.6 if d["bridge"] else 0)
         else:
             fill, stroke, sw = "#efe9dc", ("#a8291c" if d["bridge"] else "#9a8f7a"), 1.5
+        if d.get("rec"):  # on the record: dashed ink ring beats the other strokes
+            stroke, sw, dash = "#191712", 2, "stroke-dasharray='2.5 2' "
         if focus is not None and d["num"] == focus:
             focus_i = j
             parts.append(f"<circle data-f=1 cx={d['x']:.0f} cy={d['y']:.0f} r={rr + 9:.1f} fill=none "
@@ -1217,7 +1275,7 @@ def web_fig(bd, w, focus=None, small=False, cap=None):
         parts.append(
             f"<a href='{bd}/audit?q={esc(d['num'])}' target=_blank>"
             f"<circle data-d={j} cx={d['x']:.0f} cy={d['y']:.0f} r={rr:.1f} fill='{fill}' "
-            f"stroke='{stroke}' stroke-width={sw}>"
+            f"{dash}stroke='{stroke}' stroke-width={sw}>"
             f"<title>{esc(d['name'])} &middot; {d['score']} &middot; {esc(d['status'] or 'unknown')}"
             f"{' &middot; SHARED between owners' if d['bridge'] else ''}</title></circle></a>")
     for k, o in enumerate(w["owners"]):
@@ -1250,7 +1308,7 @@ def web_fig(bd, w, focus=None, small=False, cap=None):
         cap = (f"<b>{' &middot; '.join(esc(n) for n in w['top'])}{' &hellip;' if w['K'] > 5 else ''}</b>"
                f"<span>{bridged} &middot; {w['n_comp']} companies &middot; "
                f"{w['n_active']} active &middot; mean {w['mean']:.2f}</span>")
-    return (f"<figure class='web{' big' if w['K'] >= 5 else ''}'>"
+    return (f"<figure class='web{' big' if w.get('K', 0) >= 5 else ''}'>"
             f"<svg viewBox='{vb[0]:.0f} {vb[1]:.0f} {vb[2]:.0f} {vb[3]:.0f}'>"
             f"<g class=vp>" + "".join(parts) + "</g></svg>"
             f"<script type='application/json' class=gd>{payload.replace('</', '<\\/')}</script>"
@@ -1367,9 +1425,12 @@ async def home(req: Request):
 
 def _result(bd, row, review_html):
     pctl, _, _ = severity(row["pct_rank"])
+    rec = on_record(row["company_number"])
     ctx = (f"the audit page for {row['company_name']} (company number "
-           f"{row['company_number']}), ranked at the {ordinal(pctl)} percentile")
-    return page(bd, f"<div class=stage>{evidence_card(row)}{rail(bd, row, review_html)}</div>"
+           f"{row['company_number']}), ranked at the {ordinal(pctl)} percentile"
+           + (f"; ALREADY ON THE RECORD via {rec[0]}" if rec else ""))
+    return page(bd, onrec_band(row)
+                    + f"<div class=stage>{evidence_card(row)}{rail(bd, row, review_html)}</div>"
                     f"{chair_fig(bd, row)}{ego_fig(bd, row)}", ask_ctx=ctx)
 
 
