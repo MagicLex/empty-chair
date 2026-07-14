@@ -4,3 +4,5 @@ __pycache__/
 data/
 logs-job-*/
 .env
+autoresearch/run.log
+autoresearch/artifacts/
