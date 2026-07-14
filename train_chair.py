@@ -54,6 +54,9 @@ GROUP = "office_group"
 
 
 def get_training_frame():
+    """Read THROUGH the feature view so a training dataset version materializes and
+    the registered model carries provenance (fv -> td -> model), instead of a raw
+    query.read() that leaves the feature view decorative."""
     project = hopsworks.login()
     fs = project.get_feature_store()
     reg = fs.get_feature_group("company_registry", version=1)
@@ -63,8 +66,11 @@ def get_training_frame():
         name="empty_chair_fv", version=1, query=query, labels=[LABEL],
         description="Registry + PSC concealment shape for UK companies; label = later-revealed hidden owner",
     )
-    df = query.read()  # full frame, includes the label and office_group for grouping
-    return project, fv, df
+    X, y = fv.training_data(description="empty-chair full frame, grouped holdout split in-code")
+    df = pd.concat([X, y], axis=1)  # office_group rides in X; label joined back
+    td_version = max(t.version for t in fv.get_training_datasets())
+    print(f"training dataset v{td_version} ({len(df)} rows) via {fv.name} v{fv.version}")
+    return project, fv, td_version, df
 
 
 def _pre(cols_cat, cols_num):
@@ -155,7 +161,7 @@ def main():
         NUM = [c for c in NUM if c not in STRUCTURE]
         print(f"ABLATION: dropped structure confounds; {len(CAT+NUM)} features remain")
 
-    project, fv, df = get_training_frame()
+    project, fv, td_version, df = get_training_frame()
     df = df.dropna(subset=[LABEL]).reset_index(drop=True)
     df[LABEL] = df[LABEL].astype(int)
     y = df[LABEL].values
@@ -213,10 +219,10 @@ def main():
     if args.no_register:
         return
 
-    register(project, pipe, te_maps, CAT, cols_num, results, Xte, yte, score_full)
+    register(project, fv, td_version, pipe, te_maps, CAT, cols_num, results, Xte, yte, score_full)
 
 
-def register(project, pipe, te_maps, cols_cat, cols_num, results, Xte, yte, score_full):
+def register(project, fv, td_version, pipe, te_maps, cols_cat, cols_num, results, Xte, yte, score_full):
     tmp = tempfile.mkdtemp()
     # PR curve
     prec, rec, _ = precision_recall_curve(yte, score_full)
@@ -260,9 +266,10 @@ def register(project, pipe, te_maps, cols_cat, cols_num, results, Xte, yte, scor
                  "precision_at_100": results["full"]["precision_at_100"],
                  "roc_auc": results["full"]["roc_auc"]},
         description="Concealment-shape model: is a UK company's beneficial-ownership disclosure evasive (PU-labelled, lower bound)",
+        feature_view=fv, training_dataset_version=td_version,
     )
     model.save(tmp)
-    print(f"\nregistered empty_chair v{model.version}")
+    print(f"\nregistered empty_chair v{model.version} (fv {fv.name} v{fv.version}, td v{td_version})")
 
 
 if __name__ == "__main__":

@@ -970,7 +970,7 @@ def _is_active(status):
     return str(status).startswith("Active")
 
 
-MAX_WEBS = 16  # network figures rendered; smaller webs fall back to the wheel grid
+MAX_WEBS = 36  # covers every web of ~5+ owners in the current linkage; tail stays reachable via audit
 
 
 def _fr(n, edges_w, iters=250):
@@ -1143,6 +1143,9 @@ def _build_webs():
                      key=lambda i: -float(heat[i]))
     U["webs"] = [_web_layout(v, mem, nests) for v in multi[:MAX_WEBS]]
     U["wheels"] = [_web_layout([i], mem, nests) for i in singles[:MAX_WHEELS]]
+    U["n_multi"], U["n_singles"] = len(multi), len(singles)
+    # size distribution of ALL webs, so the page can say how fast it decays
+    U["web_sizes"] = sorted((len(v) for v in multi), reverse=True)
     if len(multi) > MAX_WEBS:
         print(f"webs: rendering top {MAX_WEBS} of {len(multi)}, rest reachable via audit", flush=True)
     U["web_by_key"] = {w["key"]: w for w in U["webs"] + U["wheels"]}
@@ -1246,7 +1249,17 @@ async def network(req: Request):
     if nests is None or not len(nests):
         return HTMLResponse(page(bd, "<p class=note>The linkage graph is not built yet. "
                                      "Run <b>build-linkage</b> to generate concealment nests.</p>"))
-    body = ("<h2 class=sec>Concealment webs: owners bridged by shared companies</h2>"
+    sizes = U.get("web_sizes") or []
+    n_multi, n_singles = U.get("n_multi", 0), U.get("n_singles", 0)
+    big = sum(1 for s in sizes if s >= 5)
+    census = (f"<p class=hint>The census, so the selection is honest: {n_multi:,} linked webs "
+              f"exist over the top 1%. {big} of them join five owners or more; the largest "
+              f"joins {sizes[0] if sizes else 0}. The rest are pairs and triples, and "
+              f"{n_singles:,} nests share nothing. Shown here: the {min(MAX_WEBS, n_multi)} "
+              f"largest webs and the {min(MAX_WHEELS, n_singles)} hottest isolated nests; "
+              f"every other nest is reachable by auditing any of its companies.</p>")
+    body = (census
+            + "<h2 class=sec>Concealment webs: owners bridged by shared companies</h2>"
             "<p class=note><b>NOT A LIST OF WRONGDOERS.</b> Controlling many companies with this "
             "shape is normal: property developers run one company per building, REITs and "
             "corporate-secretary agents appear on hundreds by trade. Nobody here is in the leaks; "

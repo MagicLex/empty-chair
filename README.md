@@ -19,27 +19,33 @@ family property firms, dormant shells with nothing to hide.
 
 ## The result
 
-`empty_chair`, a HistGradientBoosting classifier over 28 registry and PSC
-(people-with-significant-control) features, calibrated on a grouped holdout. Held
-out by formation-address cluster so no company mill straddles train and test.
+`empty_chair` v4, a 10-seed LightGBM soft-vote over the 28 registry and PSC
+(people-with-significant-control) features plus tell interactions and grouped
+out-of-fold target encodings. Held out by formation-address cluster so no company
+mill straddles train and test. The recipe came out of an autoresearch round
+(22 logged experiments, [`autoresearch/REPORT.md`](autoresearch/REPORT.md)) that
+lifted PR-AUC 31.7% over the v3 HistGradientBoosting baseline.
 
 | metric (grouped holdout, 21,350 companies) | value |
 |---|---:|
-| PR-AUC | **0.286** |
-| PR-AUC lift over base rate | **6.1×** |
-| ROC-AUC | 0.868 |
-| precision@100 | 0.76 |
-| precision@1000 | 0.30 |
+| PR-AUC | **0.377** |
+| PR-AUC lift over base rate | **8.0×** |
+| ROC-AUC | 0.882 |
+| precision@100 | 0.95 |
+| precision@1000 | 0.373 |
 | blind investigator rule (PR-AUC) | 0.049 |
 | demographics-only control (PR-AUC) | 0.070 |
-| shuffle-label control (PR-AUC) | 0.047 |
+| shuffle-label control (PR-AUC) | 0.050 |
 
 The controls are the point. The naive investigator rule (flag anything silent,
 corporate-only, or foreign-corporate) scores at the base rate: useless alone. A
 demographics-only model (incorporation year, sector, region) barely beats chance,
 so the signal is **not** population bias, it is the shape of the disclosure. The
-shuffle-label run collapses to chance, so there is no leak. Of the 100 companies
-the model flags hardest, 76 are genuine later-revealed cases at a 4.8% base rate.
+shuffle-label run collapses to chance, so there is no leak, target encodings
+included. Of the 100 companies the model flags hardest, 95 are genuine
+later-revealed cases at a 4.8% base rate. The autoresearch round also pruned the
+mill-address and dormant-accounts confounds as an ablation: it cost 0.002 PR-AUC,
+so the model rides the PSC concealment shape, not the population confound.
 
 ## Caveats
 
@@ -74,7 +80,7 @@ flowchart LR
         lab --> f2
     end
     subgraph TR[Training]
-        reg --> fv{{empty_chair_fv}}:::hops --> t[train HGB + controls] --> m[(Model Registry)]:::hops
+        reg --> fv{{empty_chair_fv}}:::hops --> t[train LGBM vote + controls] --> m[(Model Registry)]:::hops
         psc --> fv
     end
     subgraph INF[Inference]
