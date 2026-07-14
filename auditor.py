@@ -20,7 +20,7 @@ from chair_features import (CONCEALMENT_FLAGS, derive_features, primary_sic,
                             psc_features, registry_features)
 
 MODEL_NAME = "empty_chair"
-MODEL_VERSION = 5  # autoresearch jul14 winner, provenance-linked: 10-seed LGBM vote + TE (autoresearch/REPORT.md)
+MODEL_VERSION = 6  # single-seed LGBM, TE without sic_code (v5 top 1% was 99.3% real estate, docs/bias-audit.md)
 
 
 @functools.lru_cache(maxsize=1)
