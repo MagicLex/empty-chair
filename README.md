@@ -203,6 +203,10 @@ are ranks, uncalibrated by design.
   score by nothing (0.112 vs 0.122). [`docs/bias-audit.md`](docs/bias-audit.md).
 - Intended use: anonymous structural triage, an ordering of where to look.
 
+| PR curve | calibration (uncalibrated by design) | LightGBM gain |
+|---|---|---|
+| ![v11 PR curve](assets/pr_curve.png) | ![v11 calibration](assets/calibration.png) | ![v11 feature importance](assets/importance.png) |
+
 ### v5, retired
 
 - 10-seed LightGBM soft-vote with tell interactions, target encodings of
