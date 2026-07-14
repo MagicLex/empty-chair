@@ -32,13 +32,11 @@ def main() -> None:
     cfg["resourceConfig"]["memory"] = 8192  # address dict + positive rows headroom
 
     job = ja.get_job(JOB_NAME)
-    if job is None:
-        job = ja.create_job(JOB_NAME, cfg)
-        print(f"created job {job.name} on {ENV_NAME}", flush=True)
-    else:
-        job.config = cfg
-        job.save()
-        print(f"updated job {job.name}", flush=True)
+    if job is not None:  # config property lost its setter; recreate instead
+        job.delete()
+        print(f"deleted stale {JOB_NAME}", flush=True)
+    job = ja.create_job(JOB_NAME, cfg)
+    print(f"created job {job.name} on {ENV_NAME}", flush=True)
     print(f"appPath={app_path}\nargs=--data-dir {_data}", flush=True)
 
 
