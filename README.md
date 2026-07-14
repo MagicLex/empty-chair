@@ -132,9 +132,11 @@ All public and free. Companies House basic company data + PSC snapshot (bulk,
 Companies House), ICIJ Offshore Leaks database (bulk CSV), and the OpenSanctions
 consolidated targets export (`targets.simple.csv`, [default
 dataset](https://www.opensanctions.org/datasets/default/): sanctions plus
-debarment, crime and PEP-linked watchlists; GB entities only). The two
-heavy captures are kept out of git; `build_labels` and `ingest_registry` rebuild
-every feature group from them.
+debarment, crime and PEP-linked watchlists; GB entities only). The captures are
+kept out of git; the exact frozen snapshots behind the published numbers (plus
+the scored parquet) are attached to the
+[v11 release](https://github.com/MagicLex/empty-chair/releases/tag/v11), and
+`build_labels` and `ingest_registry` rebuild every feature group from them.
 
 ## Reproduce
 
