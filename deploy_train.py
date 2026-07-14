@@ -8,7 +8,7 @@ from pathlib import Path
 import hopsworks
 
 JOB_NAME = "train-chair"
-ENV_NAME = "pandas-training-pipeline"
+ENV_NAME = "empty-chair-train"
 _rel = str(Path(__file__).resolve()).split("/hopsfs/", 1)[1].rsplit("/", 1)[0]
 
 
@@ -20,10 +20,9 @@ def main():
     cfg["environmentName"] = ENV_NAME
     cfg["resourceConfig"]["memory"] = 8192
     job = ja.get_job(JOB_NAME)
-    if job is None:
-        job = ja.create_job(JOB_NAME, cfg); print(f"created {JOB_NAME}")
-    else:
-        job.config = cfg; job.save(); print(f"updated {JOB_NAME}")
+    if job is not None:  # config property lost its setter; recreate instead
+        job.delete(); print(f"deleted stale {JOB_NAME}")
+    ja.create_job(JOB_NAME, cfg); print(f"created {JOB_NAME}")
     print(cfg["appPath"])
 
 

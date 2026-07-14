@@ -11,14 +11,16 @@ from __future__ import annotations
 import functools
 import json
 
+import os
+
 import pandas as pd
 
 import hopsworks
-from chair_features import (CONCEALMENT_FLAGS, primary_sic, psc_features,
-                            registry_features)
+from chair_features import (CONCEALMENT_FLAGS, derive_features, primary_sic,
+                            psc_features, registry_features)
 
 MODEL_NAME = "empty_chair"
-MODEL_VERSION = 3  # concealment-only; structure confounds dropped (see docs/bias-audit.md)
+MODEL_VERSION = 4  # autoresearch jul14 winner: 10-seed LGBM vote + TE (autoresearch/REPORT.md)
 
 
 @functools.lru_cache(maxsize=1)
@@ -27,7 +29,11 @@ def _load():
     import joblib
     with open(f"{d}/features.json") as f:
         feats = json.load(f)["features"]
-    return joblib.load(f"{d}/model.joblib"), feats
+    te_maps = None
+    if os.path.exists(f"{d}/te_maps.json"):
+        with open(f"{d}/te_maps.json") as f:
+            te_maps = json.load(f)
+    return joblib.load(f"{d}/model.joblib"), feats, te_maps
 
 
 def load_model():
@@ -49,14 +55,16 @@ def features_for(registry_row: dict, psc_records: list[dict], mill_count: int) -
 
 def score_one(feats: dict, model=None) -> float:
     model = model or load_model()
-    cols = model_features()
-    X = pd.DataFrame([{c: feats.get(c) for c in cols}])
-    return float(model.predict_proba(X)[:, 1][0])
+    _, cols, te_maps = _load()
+    X = derive_features(pd.DataFrame([feats]), te_maps)
+    return float(model.predict_proba(X[cols])[:, 1][0])
 
 
 def score_frame(df: pd.DataFrame, model=None) -> "pd.Series":
     model = model or load_model()
-    return pd.Series(model.predict_proba(df[model_features()])[:, 1], index=df.index)
+    _, cols, te_maps = _load()
+    df = derive_features(df, te_maps)
+    return pd.Series(model.predict_proba(df[cols])[:, 1], index=df.index)
 
 
 def fired_flags(feats: dict) -> list[dict]:

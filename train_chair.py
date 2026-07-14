@@ -1,8 +1,12 @@
 """T: train the empty-chair concealment model.
 
 Feature view `empty_chair_fv` = company_registry JOIN psc_shape on company_number
-(label `is_revealed` already lives in company_registry). HistGradientBoosting with
-balanced weights, calibrated on a grouped holdout.
+(label `is_revealed` already lives in company_registry). v4 recipe from the
+autoresearch jul14 round (autoresearch/REPORT.md): 10-seed LightGBM soft-vote,
+unweighted, uncalibrated (the app presents rank, never probability), interaction
+features and grouped out-of-fold target encoding of post_area / sic_section /
+sic_code. Derivations live in chair_features.derive_features and the frozen
+encoding maps ship inside the artifact (te_maps.json), so scoring cannot skew.
 
 Every honesty control the design demands runs here and its number is printed and
 saved, so a reader can see whether the signal is concealment shape or an artifact:
@@ -10,7 +14,7 @@ saved, so a reader can see whether the signal is concealment shape or an artifac
   - blind rule baseline: flag if silent / corporate-only / foreign-corporate PSC.
   - demographics-only control: year + sic_section + region only. If it matches the
     full model, the signal is population bias, not concealment.
-  - shuffle-label control: must collapse to chance.
+  - shuffle-label control (full recipe incl. TE): must collapse to chance.
 Headline = PR-AUC and precision@k lift over the blind rule (PU labels => lower bound).
 
 Registers `empty_chair` with eval JSON + PR / calibration / importance PNGs.
@@ -28,19 +32,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
-from sklearn.frozen import FrozenEstimator
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, VotingClassifier
 from sklearn.metrics import (average_precision_score, brier_score_loss,
                              precision_recall_curve, roc_auc_score)
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
 
 import hopsworks
 from chair_features import CAT_FEATURES as CAT
 from chair_features import NUM_FEATURES as NUM
+from chair_features import DERIVED_NUM, TE_COLS, derive_features
 
 DEMOG = ["incorporation_year", "sic_section", "post_area", "country"]
 # the legitimate-structure confounds the bias audit flagged (property/holding SPV shape)
@@ -64,16 +67,56 @@ def get_training_frame():
     return project, fv, df
 
 
-def make_pipeline(cols_cat, cols_num):
-    pre = ColumnTransformer(
+def _pre(cols_cat, cols_num):
+    return ColumnTransformer(
         [("cat", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1,
                                 encoded_missing_value=-1), cols_cat),
          ("num", "passthrough", cols_num)])
+
+
+def make_pipeline(cols_cat, cols_num, seeds=10):
+    """The v4 winner: soft-vote over seed-varied LightGBMs, unweighted, uncalibrated."""
+    from lightgbm import LGBMClassifier
+
+    def lgbm(seed):
+        return LGBMClassifier(
+            n_estimators=1500, learning_rate=0.02, num_leaves=31,
+            reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
+            colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
+            random_state=seed, n_jobs=-1, verbose=-1)
+    clf = VotingClassifier([(f"s{s}", lgbm(s)) for s in range(seeds)], voting="soft")
+    return Pipeline([("pre", _pre(cols_cat, cols_num)), ("clf", clf)])
+
+
+def make_control_pipeline(cols_cat, cols_num):
+    """HGB, for the demographics and shuffle controls (cheap, single fit)."""
     clf = HistGradientBoostingClassifier(
         max_iter=400, learning_rate=0.05, max_leaf_nodes=31,
         l2_regularization=1.0, early_stopping=True, validation_fraction=0.15,
         class_weight="balanced", random_state=0)
-    return Pipeline([("pre", pre), ("clf", clf)])
+    return Pipeline([("pre", _pre(cols_cat, cols_num)), ("clf", clf)])
+
+
+TE_SMOOTH = 20
+
+
+def fit_target_encoding(Xtr, ytr, groups_tr, Xte):
+    """Grouped out-of-fold target encoding on the train slice (no leak into the
+    trees), full-train maps applied to the holdout and frozen for the artifact."""
+    prior = float(ytr.mean())
+    maps = {"__prior__": prior}
+    for c in TE_COLS:
+        oof = np.full(len(Xtr), prior)
+        for fi, vi in GroupKFold(n_splits=5).split(Xtr, ytr, groups_tr):
+            agg = pd.Series(ytr[fi]).groupby(Xtr[c].astype(str).iloc[fi].values).agg(["sum", "count"])
+            smooth = (agg["sum"] + TE_SMOOTH * prior) / (agg["count"] + TE_SMOOTH)
+            oof[vi] = Xtr[c].astype(str).iloc[vi].map(smooth).fillna(prior).values
+        Xtr[c + "_te"] = oof
+        agg = pd.Series(ytr).groupby(Xtr[c].astype(str).values).agg(["sum", "count"])
+        smooth = (agg["sum"] + TE_SMOOTH * prior) / (agg["count"] + TE_SMOOTH)
+        Xte[c + "_te"] = Xte[c].astype(str).map(smooth).fillna(prior).values
+        maps[c] = {str(k): float(v) for k, v in smooth.items()}
+    return maps
 
 
 def precision_at_k(y, score, k):
@@ -132,29 +175,34 @@ def main():
     # --- blind rule baseline
     results["blind_rule"] = evaluate("blind_rule", yte, blind_rule(Xte).astype(float))
 
-    # --- full model: fit on an inner grouped slice, calibrate on the held slice
-    gss2 = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=1)
-    fit_i, cal_i = next(gss2.split(Xtr, ytr, groups[tr]))
-    pipe = make_pipeline(CAT, NUM)
-    pipe.fit(Xtr.iloc[fit_i][CAT + NUM], ytr[fit_i])
-    cal = CalibratedClassifierCV(FrozenEstimator(pipe), method="isotonic")
-    cal.fit(Xtr.iloc[cal_i][CAT + NUM], ytr[cal_i])
-    score_full = cal.predict_proba(Xte[CAT + NUM])[:, 1]
+    # --- full model: derived features + OOF target encoding, fit on the whole
+    # train slice (the round showed a calibration slice buys nothing for ranking)
+    Xtr = derive_features(df.iloc[tr].copy())
+    Xte = derive_features(df.iloc[te].copy())
+    te_maps = fit_target_encoding(Xtr, ytr, groups[tr], Xte)
+    cols_num = NUM + DERIVED_NUM + [c + "_te" for c in TE_COLS]
+    pipe = make_pipeline(CAT, cols_num)
+    pipe.fit(Xtr[CAT + cols_num], ytr)
+    score_full = pipe.predict_proba(Xte[CAT + cols_num])[:, 1]
     results["full"] = evaluate("full", yte, score_full)
     results["full"]["brier"] = round(brier_score_loss(yte, score_full), 4)
 
     # --- demographics-only control
-    pdem = make_pipeline(["sic_section", "post_area", "country"], ["incorporation_year"])
+    pdem = make_control_pipeline(["sic_section", "post_area", "country"], ["incorporation_year"])
     pdem.fit(Xtr[DEMOG], ytr)
     score_dem = pdem.predict_proba(Xte[DEMOG])[:, 1]
     results["demographics_only"] = evaluate("demographics_only", yte, score_dem)
 
-    # --- shuffle-label control
+    # --- shuffle-label control on the full recipe: TE refit on the shuffled labels
+    # (single seed; a leak would show regardless of the ensemble size)
     rng = np.random.RandomState(0)
     yshuf = rng.permutation(ytr)
-    pshuf = make_pipeline(CAT, NUM)
-    pshuf.fit(Xtr[CAT + NUM], yshuf)
-    score_shuf = pshuf.predict_proba(Xte[CAT + NUM])[:, 1]
+    Xtr_s = derive_features(df.iloc[tr].copy())
+    Xte_s = derive_features(df.iloc[te].copy())
+    fit_target_encoding(Xtr_s, yshuf, groups[tr], Xte_s)
+    pshuf = make_pipeline(CAT, cols_num, seeds=1)
+    pshuf.fit(Xtr_s[CAT + cols_num], yshuf)
+    score_shuf = pshuf.predict_proba(Xte_s[CAT + cols_num])[:, 1]
     results["shuffle_label"] = evaluate("shuffle_label", yte, score_shuf)
 
     print("\n=== RESULTS (grouped holdout) ===")
@@ -165,10 +213,10 @@ def main():
     if args.no_register:
         return
 
-    register(project, cal, pipe, results, Xte, yte, score_full)
+    register(project, pipe, te_maps, CAT, cols_num, results, Xte, yte, score_full)
 
 
-def register(project, cal, pipe, results, Xte, yte, score_full):
+def register(project, pipe, te_maps, cols_cat, cols_num, results, Xte, yte, score_full):
     tmp = tempfile.mkdtemp()
     # PR curve
     prec, rec, _ = precision_recall_curve(yte, score_full)
@@ -176,30 +224,33 @@ def register(project, cal, pipe, results, Xte, yte, score_full):
     plt.xlabel("recall"); plt.ylabel("precision")
     plt.title(f"PR (AP={results['full']['pr_auc']}, base={results['full']['base_rate']})")
     plt.tight_layout(); plt.savefig(f"{tmp}/pr_curve.png", dpi=120); plt.close()
-    # calibration
+    # calibration (the model is uncalibrated by design, the plot shows it honestly)
     from sklearn.calibration import calibration_curve
     frac, mean = calibration_curve(yte, score_full, n_bins=10, strategy="quantile")
     plt.figure(figsize=(5, 4)); plt.plot([0, 1], [0, 1], "--", c="gray"); plt.plot(mean, frac, "o-")
-    plt.xlabel("predicted"); plt.ylabel("observed"); plt.title("calibration")
+    plt.xlabel("predicted"); plt.ylabel("observed"); plt.title("calibration (uncalibrated, rank model)")
     plt.tight_layout(); plt.savefig(f"{tmp}/calibration.png", dpi=120); plt.close()
-    # permutation importance on the fitted pipeline
-    from sklearn.inspection import permutation_importance
-    imp = permutation_importance(pipe, Xte[CAT + NUM], yte, n_repeats=5,
-                                 random_state=0, scoring="average_precision", n_jobs=-1)
-    names = CAT + NUM
-    order = np.argsort(imp.importances_mean)[::-1][:15]
-    plt.figure(figsize=(6, 5)); plt.barh([names[i] for i in order][::-1],
-                                          imp.importances_mean[order][::-1])
-    plt.title("permutation importance (AP)"); plt.tight_layout()
+    # importance: mean LightGBM gain across the vote (permutation over the 10-model
+    # ensemble costs more than it teaches here)
+    names = list(pipe.named_steps["pre"].get_feature_names_out())
+    gains = np.mean([m.feature_importances_ for m in
+                     pipe.named_steps["clf"].estimators_], axis=0)
+    order = np.argsort(gains)[::-1][:15]
+    plt.figure(figsize=(6, 5))
+    plt.barh([names[i].split("__")[-1] for i in order][::-1], gains[order][::-1])
+    plt.title("mean LightGBM gain importance"); plt.tight_layout()
     plt.savefig(f"{tmp}/importance.png", dpi=120); plt.close()
 
     with open(f"{tmp}/metrics.json", "w") as f:
         json.dump(results, f, indent=2)
-    # bundle the feature contract WITH the model so serving cannot drift from training
+    # bundle the full contract WITH the model so serving cannot drift from training:
+    # raw columns, derived columns, and the frozen target-encoding maps
     with open(f"{tmp}/features.json", "w") as f:
-        json.dump({"cat": CAT, "num": NUM, "features": CAT + NUM}, f)
+        json.dump({"cat": cols_cat, "num": cols_num, "features": cols_cat + cols_num}, f)
+    with open(f"{tmp}/te_maps.json", "w") as f:
+        json.dump(te_maps, f)
     import joblib
-    joblib.dump(cal, f"{tmp}/model.joblib")
+    joblib.dump(pipe, f"{tmp}/model.joblib")
 
     mr = project.get_model_registry()
     model = mr.python.create_model(

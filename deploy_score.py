@@ -10,7 +10,7 @@ from pathlib import Path
 import hopsworks
 
 JOB_NAME = "score-universe"
-ENV_NAME = "pandas-training-pipeline"
+ENV_NAME = "empty-chair-train"
 _here = Path(__file__).resolve()
 _rel = str(_here).split("/hopsfs/", 1)[1].rsplit("/", 1)[0]
 _data = str(_here.parent / "data")
@@ -25,10 +25,9 @@ def main():
     cfg["defaultArgs"] = f"--data-dir {_data}"
     cfg["resourceConfig"]["memory"] = 16384
     job = ja.get_job(JOB_NAME)
-    if job is None:
-        job = ja.create_job(JOB_NAME, cfg); print(f"created {JOB_NAME}")
-    else:
-        job.config = cfg; job.save(); print(f"updated {JOB_NAME}")
+    if job is not None:  # config property lost its setter; recreate instead
+        job.delete(); print(f"deleted stale {JOB_NAME}")
+    ja.create_job(JOB_NAME, cfg); print(f"created {JOB_NAME}")
     print(cfg["appPath"], "| args:", cfg["defaultArgs"])
 
 

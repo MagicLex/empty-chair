@@ -193,6 +193,31 @@ CONCEALMENT_FLAGS = {
     "accounts_dormant": "Files dormant / no-trading accounts",
 }
 
+# v4 model contract: interaction features + frozen target encodings, derived from
+# the disclosure columns only. ONE code path for training and every scoring pass;
+# the te_maps ship inside the model artifact (te_maps.json).
+DERIVED_NUM = ["n_tells", "mill_x_no_individual", "mill_x_silence",
+               "dormant_x_corp_only", "holding_x_foreign", "foreign_corp_ratio"]
+TE_COLS = ["post_area", "sic_section", "sic_code"]
+_TELLS = ["psc_absent", "psc_silence", "psc_corporate_only", "psc_super_secure",
+          "psc_exempt", "is_mill_address", "is_holding_sic", "accounts_dormant"]
+
+
+def derive_features(df, te_maps=None):
+    """Add DERIVED_NUM interactions and, when te_maps is given, the <col>_te
+    encodings. Mutates and returns df."""
+    df["n_tells"] = df[_TELLS].sum(axis=1)
+    df["mill_x_no_individual"] = df["is_mill_address"] * df["psc_has_no_individual"]
+    df["mill_x_silence"] = df["is_mill_address"] * df["psc_silence"]
+    df["dormant_x_corp_only"] = df["accounts_dormant"] * df["psc_corporate_only"]
+    df["holding_x_foreign"] = df["is_holding_sic"] * (df["psc_foreign_corporate"] > 0).astype(int)
+    df["foreign_corp_ratio"] = df["psc_foreign_corporate"] / df["psc_n_corporate"].clip(lower=1)
+    if te_maps:
+        prior = te_maps["__prior__"]
+        for c in TE_COLS:
+            df[c + "_te"] = df[c].astype(str).map(te_maps[c]).fillna(prior)
+    return df
+
 
 # feature-group descriptions, the published contract
 REGISTRY_DOC = {
