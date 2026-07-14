@@ -9,7 +9,9 @@ The inverse model. Most detectors hunt the suspicious thing that is present: the
 nominee with 400 directorships, the offshore address. This one hunts the thing
 that is deliberately absent. It scores a UK company for how much its public
 ownership **disclosure** is shaped like the structures where a hidden beneficial
-owner was later revealed, in the ICIJ offshore leaks or on sanctions lists. The
+owner was later revealed, in the ICIJ offshore leaks or on the OpenSanctions
+consolidated list (sanctions regimes plus debarment, crime and PEP-linked
+watchlists). The
 empty chair where an owner should be.
 
 It reports a **signal, not a verdict**. A high rank means the disclosure resembles
@@ -119,7 +121,10 @@ app/deploy_app.py     deploy the app
 ## Data
 
 All public and free. Companies House basic company data + PSC snapshot (bulk,
-Companies House), ICIJ Offshore Leaks database (bulk CSV), OpenSanctions. The two
+Companies House), ICIJ Offshore Leaks database (bulk CSV), and the OpenSanctions
+consolidated targets export (`targets.simple.csv`, [default
+dataset](https://www.opensanctions.org/datasets/default/): sanctions plus
+debarment, crime and PEP-linked watchlists; GB entities only). The two
 heavy captures are kept out of git; `build_labels` and `ingest_registry` rebuild
 every feature group from them.
 
