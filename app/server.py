@@ -210,10 +210,16 @@ td.no{font:.82rem var(--mono);color:var(--dim)}
 .tip div{display:flex;gap:12px;justify-content:space-between}
 .tip b{color:#fff;white-space:nowrap}
 .tip span{color:#cfc8b8;text-align:right}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0;
- border-top:1px solid var(--ink);margin-top:16px}
-.grid .web{border:0;border-right:1px solid var(--faint);border-bottom:1px solid var(--ink);
- margin:0;padding:10px 12px 14px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:14px}
+.grid2 .web{margin:0}
+.grid2 .web.big{grid-column:1/-1}
+.nf{display:flex;gap:0;border:2px solid var(--ink);margin:14px 0 4px;flex-wrap:wrap}
+.nf input[type=text]{flex:1;min-width:140px}
+.nf select{background:#0000;border:0;border-left:1px solid var(--faint);
+ font:600 .72rem var(--mono);letter-spacing:.08em;padding:0 10px;color:var(--ink)}
+.pgr{display:flex;justify-content:space-between;align-items:center;margin:10px 0;
+ font:.7rem/1 var(--mono);letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.pgr .btn{padding:8px 12px;display:inline-block}
 .leg{display:flex;gap:16px;flex-wrap:wrap;font:.66rem/1 var(--mono);color:var(--dim);
  letter-spacing:.08em;margin:10px 0;align-items:center}
 .leg b{color:var(--ink)}
@@ -1141,20 +1147,28 @@ def _build_webs():
                    key=lambda v: -sum(len(mem[i]) for i in v))
     singles = sorted((v[0] for v in comps.values() if len(v) == 1),
                      key=lambda i: -float(heat[i]))
+    # warm the layout cache with the biggest webs and hottest wheels (default view)
     U["webs"] = [_web_layout(v, mem, nests) for v in multi[:MAX_WEBS]]
     U["wheels"] = [_web_layout([i], mem, nests) for i in singles[:MAX_WHEELS]]
     U["n_multi"], U["n_singles"] = len(multi), len(singles)
-    # size distribution of ALL webs, so the page can say how fast it decays
     U["web_sizes"] = sorted((len(v) for v in multi), reverse=True)
-    if len(multi) > MAX_WEBS:
-        print(f"webs: rendering top {MAX_WEBS} of {len(multi)}, rest reachable via audit", flush=True)
     U["web_by_key"] = {w["key"]: w for w in U["webs"] + U["wheels"]}
     U["comp_of"] = {}
+    # per-component summary for /network filtering and pagination; layouts are
+    # computed on demand per page and cached in web_by_key
+    comp_list = []
     for v in comps.values():
         t = tuple(v)
+        best = {}
         for i in v:
             for x in mem[i]:
                 U["comp_of"].setdefault(x["number"], t)
+                best[x["number"]] = max(best.get(x["number"], 0.0), float(x["score"]))
+        comp_list.append({"key": t, "K": len(v), "n_comp": len(best),
+                          "mean": float(np.mean(list(best.values()))),
+                          "owners": [str(nests.iloc[i]["owner_name"]) for i in v]})
+    U["comps"] = comp_list
+    print(f"webs: {len(multi)} linked + {len(singles)} single components indexed", flush=True)
 
 
 def _owner_tip(o):
@@ -1236,7 +1250,8 @@ def web_fig(bd, w, focus=None, small=False, cap=None):
         cap = (f"<b>{' &middot; '.join(esc(n) for n in w['top'])}{' &hellip;' if w['K'] > 5 else ''}</b>"
                f"<span>{bridged} &middot; {w['n_comp']} companies &middot; "
                f"{w['n_active']} active &middot; mean {w['mean']:.2f}</span>")
-    return (f"<figure class=web><svg viewBox='{vb[0]:.0f} {vb[1]:.0f} {vb[2]:.0f} {vb[3]:.0f}'>"
+    return (f"<figure class='web{' big' if w['K'] >= 5 else ''}'>"
+            f"<svg viewBox='{vb[0]:.0f} {vb[1]:.0f} {vb[2]:.0f} {vb[3]:.0f}'>"
             f"<g class=vp>" + "".join(parts) + "</g></svg>"
             f"<script type='application/json' class=gd>{payload.replace('</', '<\\/')}</script>"
             f"<figcaption>{cap}</figcaption></figure>")
@@ -1249,36 +1264,82 @@ async def network(req: Request):
     if nests is None or not len(nests):
         return HTMLResponse(page(bd, "<p class=note>The linkage graph is not built yet. "
                                      "Run <b>build-linkage</b> to generate concealment nests.</p>"))
+    qp = req.query_params
+
+    def _int(name, default):
+        try:
+            return max(1, int(qp.get(name) or default))
+        except ValueError:
+            return default
+    q = (qp.get("q") or "").strip()[:80]
+    min_k = _int("min", 1)
+    sort = qp.get("sort") if qp.get("sort") in ("size", "heat", "owners") else "size"
+    pageno = _int("page", 1)
+
+    comps = U.get("comps") or []
+    sel = [c for c in comps if c["K"] >= min_k]
+    if q:
+        qq = q.upper()
+        sel = [c for c in sel if any(qq in o.upper() for o in c["owners"])]
+    sel.sort(key={"size": lambda c: (-c["n_comp"], -c["K"]),
+                  "heat": lambda c: (-c["mean"], -c["n_comp"]),
+                  "owners": lambda c: (-c["K"], -c["n_comp"])}[sort])
+    PER = 12
+    pages = max(1, math.ceil(len(sel) / PER))
+    pageno = min(pageno, pages)
+    items = sel[(pageno - 1) * PER: pageno * PER]
+    figs = []
+    for c in items:
+        w = U["web_by_key"].get(c["key"])
+        if w is None:
+            w = _web_layout(list(c["key"]), U["mem"], nests)
+            U["web_by_key"][c["key"]] = w
+        figs.append(web_fig(bd, w, small=c["K"] < 3))
+
     sizes = U.get("web_sizes") or []
     n_multi, n_singles = U.get("n_multi", 0), U.get("n_singles", 0)
-    big = sum(1 for s in sizes if s >= 5)
-    census = (f"<p class=hint>The census, so the selection is honest: {n_multi:,} linked webs "
-              f"exist over the top 1%. {big} of them join five owners or more; the largest "
-              f"joins {sizes[0] if sizes else 0}. The rest are pairs and triples, and "
-              f"{n_singles:,} nests share nothing. Shown here: the {min(MAX_WEBS, n_multi)} "
-              f"largest webs and the {min(MAX_WHEELS, n_singles)} hottest isolated nests; "
-              f"every other nest is reachable by auditing any of its companies.</p>")
-    body = (census
-            + "<h2 class=sec>Concealment webs: owners bridged by shared companies</h2>"
+    census = (f"<p class=hint>The census: {n_multi:,} linked webs over the top 1% "
+              f"({sum(1 for s in sizes if s >= 5)} join five owners or more, the largest "
+              f"joins {sizes[0] if sizes else 0}), plus {n_singles:,} isolated nests. "
+              f"Filter and page through all of them below.</p>")
+
+    def qs(**over):
+        params = {"q": q, "min": min_k, "sort": sort, "page": pageno} | over
+        return "&amp;".join(f"{k}={esc(v)}" for k, v in params.items() if v not in ("", 1, "size"))
+    pager = f"<div class=pgr><span>{len(sel):,} match &middot; page {pageno}/{pages}</span><span>"
+    if pageno > 1:
+        pager += f"<a class=btn href='{bd}/network?{qs(page=pageno - 1)}'>&larr; prev</a> "
+    if pageno < pages:
+        pager += f"<a class=btn href='{bd}/network?{qs(page=pageno + 1)}'>next &rarr;</a>"
+    pager += "</span></div>"
+
+    def opt(val, cur, label):
+        return f"<option value={val}{' selected' if val == cur else ''}>{label}</option>"
+    filters = (f"<form class=nf method=get action='{bd}/network'>"
+               f"<input type=text name=q value='{esc(q)}' placeholder='OWNER NAME'>"
+               f"<select name=min>{opt(1, min_k, 'ALL SIZES')}{opt(2, min_k, '2+ OWNERS')}"
+               f"{opt(5, min_k, '5+ OWNERS')}{opt(8, min_k, '8+ OWNERS')}</select>"
+               f"<select name=sort>{opt('size', sort, 'BIGGEST')}{opt('heat', sort, 'HOTTEST')}"
+               f"{opt('owners', sort, 'MOST OWNERS')}</select>"
+               f"<button>Filter</button></form>")
+
+    body = ("<h2 class=sec>Concealment webs: owners bridged by shared companies</h2>"
             "<p class=note><b>NOT A LIST OF WRONGDOERS.</b> Controlling many companies with this "
             "shape is normal: property developers run one company per building, REITs and "
             "corporate-secretary agents appear on hundreds by trade. Nobody here is in the leaks; "
             "they only <b>match the shape</b> the leaks trained. Read it as where to look, never as "
             "who is guilty.</p>"
-            "<p class=hint>A square is an owner, a dot is a high-shape company, a red line is a "
+            + census + filters
+            + "<p class=hint>A square is an owner, a dot is a high-shape company, a red line is a "
             "company shared between two owners: the bridge that stitches nests into one web. "
             "Drag any node, scroll to zoom, hover to isolate an owner's holdings. "
             "Click a dot to open that company in a new tab.</p>"
-            + legend()
-            + "".join(web_fig(bd, w) for w in U.get("webs") or [])
-            + "<h2 class=sec>Isolated nests: hottest first</h2>"
-            "<div class=grid>"
-            + "".join(web_fig(bd, w, small=True) for w in U.get("wheels") or [])
-            + "</div>")
-    top_web = U["webs"][0] if U.get("webs") else None
-    ctx = "the concealment webs page: shared-owner graphs over the top 1%"
-    if top_web:
-        ctx += f"; the largest web joins {top_web['K']} owners over {top_web['n_comp']} companies"
+            + legend() + pager
+            + "<div class=grid2>" + "".join(figs) + "</div>"
+            + pager)
+    ctx = (f"the concealment webs page: {len(sel)} webs matching "
+           f"(filter: min {min_k} owners{', owner name ~ ' + q if q else ''}, sorted by {sort}), "
+           f"page {pageno} of {pages}")
     return HTMLResponse(page(bd, body, ask_ctx=ctx))
 
 
