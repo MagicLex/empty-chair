@@ -80,16 +80,19 @@ def _pre(cols_cat, cols_num):
          ("num", "passthrough", cols_num)])
 
 
-def make_pipeline(cols_cat, cols_num, seeds=10):
+LGBM_PARAMS = dict(
+    n_estimators=1500, learning_rate=0.02, num_leaves=31,
+    reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
+    colsample_bytree=0.8, subsample=0.8, subsample_freq=1)
+
+
+def make_pipeline(cols_cat, cols_num, seeds=10, params=None):
     """The v4 winner: soft-vote over seed-varied LightGBMs, unweighted, uncalibrated."""
     from lightgbm import LGBMClassifier
 
     def lgbm(seed):
-        return LGBMClassifier(
-            n_estimators=1500, learning_rate=0.02, num_leaves=31,
-            reg_lambda=5.0, scale_pos_weight=1.0, min_child_samples=80,
-            colsample_bytree=0.8, subsample=0.8, subsample_freq=1,
-            random_state=seed, n_jobs=-1, verbose=-1)
+        return LGBMClassifier(**(LGBM_PARAMS | (params or {})),
+                              random_state=seed, n_jobs=-1, verbose=-1)
     clf = VotingClassifier([(f"s{s}", lgbm(s)) for s in range(seeds)], voting="soft")
     return Pipeline([("pre", _pre(cols_cat, cols_num)), ("clf", clf)])
 
@@ -155,6 +158,8 @@ def main():
                     help="LGBMs in the soft-vote; 1 = the fast single-seed variant")
     ap.add_argument("--drop", default="",
                     help="comma-separated feature names to exclude from CAT/NUM")
+    ap.add_argument("--params", default="",
+                    help="LGBM overrides as k=v,k=v (numbers parsed)")
     ap.add_argument("--no-structure", action="store_true",
                     help="ablation: drop the property/holding/mill structure confounds")
     args = ap.parse_args()
@@ -195,8 +200,15 @@ def main():
     Xtr = derive_features(df.iloc[tr].copy())
     Xte = derive_features(df.iloc[te].copy())
     te_maps = fit_target_encoding(Xtr, ytr, groups[tr], Xte)
+    overrides = {}
+    for kv in filter(None, args.params.split(",")):
+        k, v = kv.split("=")
+        overrides[k.strip()] = float(v) if "." in v else int(v)
+    if overrides:
+        print(f"LGBM overrides: {overrides}")
+
     cols_num = NUM + DERIVED_NUM + [c + "_te" for c in TE_COLS]
-    pipe = make_pipeline(CAT, cols_num, seeds=args.seeds)
+    pipe = make_pipeline(CAT, cols_num, seeds=args.seeds, params=overrides)
     pipe.fit(Xtr[CAT + cols_num], ytr)
     score_full = pipe.predict_proba(Xte[CAT + cols_num])[:, 1]
     results["full"] = evaluate("full", yte, score_full)
