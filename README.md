@@ -153,6 +153,8 @@ python app/deploy_app.py                     # the review app
 
 ## The demo
 
+![the emptychair app: concealment webs with the ask-the-register drawer](assets/app.png)
+
 `emptychair`, a two-pane review. Paste any UK company number or name: the company's
 disclosure evidence renders on the left (every tell with its population base rate,
 fired ones dark), and a rank rail on the right shows the percentile stamp, the score
