@@ -153,6 +153,8 @@ def main():
     ap.add_argument("--no-register", action="store_true")
     ap.add_argument("--seeds", type=int, default=10,
                     help="LGBMs in the soft-vote; 1 = the fast single-seed variant")
+    ap.add_argument("--drop", default="",
+                    help="comma-separated feature names to exclude from CAT/NUM")
     ap.add_argument("--no-structure", action="store_true",
                     help="ablation: drop the property/holding/mill structure confounds")
     args = ap.parse_args()
@@ -162,6 +164,11 @@ def main():
         CAT = [c for c in CAT if c not in STRUCTURE]
         NUM = [c for c in NUM if c not in STRUCTURE]
         print(f"ABLATION: dropped structure confounds; {len(CAT+NUM)} features remain")
+    if args.drop:
+        gone = {c.strip() for c in args.drop.split(",") if c.strip()}
+        CAT = [c for c in CAT if c not in gone]
+        NUM = [c for c in NUM if c not in gone]
+        print(f"dropped {sorted(gone)}; {len(CAT+NUM)} features remain")
 
     project, fv, td_version, df = get_training_frame()
     df = df.dropna(subset=[LABEL]).reset_index(drop=True)
