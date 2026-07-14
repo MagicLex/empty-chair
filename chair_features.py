@@ -225,6 +225,26 @@ def derive_features(df, te_maps=None):
     return df
 
 
+# owner-degree: companies per normalized owner name across the WHOLE register.
+# Disclosure behavior, not sector: a name standing on 400 companies is the
+# serial-nominee / formation-agent pattern. counts comes from one snapshot pass.
+def owner_degree_features(owner_keys, counts):
+    ks = [k for k in owner_keys if k]
+    if not ks:
+        return {"owner_max_companies": 0, "owner_mean_companies": 0.0, "owner_n_named": 0}
+    vals = [int(counts.get(k, 1)) for k in ks]
+    return {"owner_max_companies": max(vals),
+            "owner_mean_companies": float(sum(vals) / len(vals)),
+            "owner_n_named": len(ks)}
+
+
+OWNER_DOC = {
+    "owner_max_companies": "Companies controlled by this company's busiest named PSC owner (whole register)",
+    "owner_mean_companies": "Mean companies per named PSC owner of this company",
+    "owner_n_named": "Named (non-statement) PSC owners on file",
+}
+
+
 # feature-group descriptions, the published contract
 REGISTRY_DOC = {
     "incorporation_year": "Year the company was incorporated",
