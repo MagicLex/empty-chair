@@ -21,33 +21,40 @@ family property firms, dormant shells with nothing to hide.
 
 ## The result
 
-`empty_chair` v5, a 10-seed LightGBM soft-vote over the 28 registry and PSC
-(people-with-significant-control) features plus tell interactions and grouped
-out-of-fold target encodings. Held out by formation-address cluster so no company
-mill straddles train and test. The recipe came out of an autoresearch round
-(22 logged experiments, [`autoresearch/REPORT.md`](autoresearch/REPORT.md)) that
-lifted PR-AUC 31.7% over the v3 HistGradientBoosting baseline.
+`empty_chair` v11, a single tuned LightGBM over the registry and PSC
+(people-with-significant-control) disclosure features plus tell interactions and
+a grouped out-of-fold target encoding of the office post area. Held out by
+formation-address cluster so no company mill straddles train and test. The model
+carries no sector identity: no SIC code, no SIC section, no sector encoding.
+Earlier versions scored higher with sector in; the bias audit retired them (see
+the model cards).
 
 | metric (grouped holdout, 21,350 companies) | value |
 |---|---:|
-| PR-AUC | **0.377** |
-| PR-AUC lift over base rate | **8.0×** |
-| ROC-AUC | 0.882 |
-| precision@100 | 0.95 |
-| precision@1000 | 0.373 |
+| PR-AUC | **0.199** |
+| PR-AUC lift over base rate | **4.2×** |
+| ROC-AUC | 0.848 |
+| precision@100 | 0.42 |
+| precision@1000 | 0.233 |
 | blind investigator rule (PR-AUC) | 0.049 |
 | demographics-only control (PR-AUC) | 0.070 |
-| shuffle-label control (PR-AUC) | 0.050 |
+| shuffle-label control (PR-AUC) | 0.049 |
 
 The naive investigator rule (flag anything silent,
 corporate-only, or foreign-corporate) scores at the base rate: useless alone. A
-demographics-only model (incorporation year, sector, region) barely beats chance,
-so the signal sits in the shape of the disclosure. The
-shuffle-label run collapses to chance, so there is no leak, target encodings
-included. Of the 100 companies the model flags hardest, 95 are genuine
-later-revealed cases at a 4.8% base rate. The autoresearch round also pruned the
-mill-address and dormant-accounts confounds as an ablation: it cost 0.002 PR-AUC,
-so the model rides the PSC concealment shape, not the population confound.
+demographics-only model (incorporation year, sector, region) barely beats chance.
+The shuffle-label run collapses to chance, so there is no leak, target encoding
+included. Of the 100 holdout companies the model flags hardest, 42 are genuine
+later-revealed cases at a 4.8% base rate.
+
+The number is half of what this model family can score, on purpose. With sector
+features in, the same recipe reaches PR-AUC 0.377, and scoring the full 5.7M
+universe showed where that extra skill lives: the top 1% was 99.3% real estate,
+while real estate is only 13.8% of the training positives, and the most
+label-enriched sector (financial holding, 3.2x) was absent from the top
+entirely. Sector features let the model park its confidence on one easy cluster
+instead of reading each disclosure. The trail from 0.377 to 0.199 is in
+[`docs/bias-audit.md`](docs/bias-audit.md) and the model cards below.
 
 ## Caveats
 
@@ -103,7 +110,7 @@ hiding, revealed after the fact.
 The file-by-file map:
 
 ```
-chair_features.py     shared, pure: CH row + PSC records -> 28 features + fired tells
+chair_features.py     shared, pure: CH row + PSC records -> disclosure features + fired tells
 build_labels.py       F1  ICIJ + sanctions -> revealed_owner (label)      (job)
 ingest_registry.py    F2  CH bulk -> company_registry (case-control 20:1)  (job)
 ingest_psc.py         F3  PSC snapshot -> psc_shape                        (job)
@@ -111,6 +118,7 @@ train_chair.py        T   feature view -> empty_chair + honesty controls   (job)
 auditor.py            I   load model, score a company, list fired tells
 score_universe.py     I1  score all 5.7M -> parquet + concealment_dossiers (job)
 build_linkage.py      I2  top 1% -> shared-owner nests (linkage.parquet)   (job)
+ingest_links.py       F4  PSC snapshot -> owner_degree FG (tested, not adopted) (job)
 explain.py            I   plain-language dossier (Anthropic), signal not verdict
 ask.py                I   ask-the-register: tool-use loop over the live data
 bias_audit.py         pre-publication confound audit -> docs/bias-audit.md
@@ -170,14 +178,56 @@ conversation at that owner. Replies interpret the figures concretely, percentile
 arithmetic and tell base rates included, under the same never-accuse constraints.
 Without JavaScript it degrades to a full-page round trip.
 
-## Cost note: where the v5 gain lives
+## Cost note
 
-The 10-seed vote is the expensive part of the recipe and the smallest part of the
-gain. Of the +0.091 PR-AUC over the v3 baseline: +0.028 came from switching to
-LightGBM, +0.024 from dropping class weighting, +0.020 from dropping isotonic
-calibration (a monotone map cannot improve a ranking metric and its slice returns
-to the fit), +0.012 from interaction features and target encodings, and +0.006
-from the 10-seed ensemble, inside the round's ±0.002 noise floor. The ensemble
-multiplies universe scoring from minutes to about 45 minutes for 5.7M companies.
-A single-seed variant scores 0.368 at a tenth of the cost and sits in the
-`autoresearch_jul14` registry versions if that trade is ever preferred.
+Universe scoring with the single-seed model takes about 30 minutes for 5.7M
+companies; a 10-seed soft-vote takes just over two hours and, on the sector-blind
+recipe, scored 0.196 to the single seed's 0.199 (v10 vs v11 in the registry).
+The vote buys top-of-ranking stability across retrains, not accuracy.
+
+## Model cards
+
+One registry, `empty_chair`. All versions train on `empty_chair_fv` v1 and
+evaluate on the same grouped holdout (21,350 companies, 4.7% base rate). Scores
+are ranks, uncalibrated by design.
+
+### v11, production
+
+- Single LightGBM: 1500 trees, lr 0.02, 31 leaves, min_child_samples 20, no row
+  or column subsampling. Tell interactions, grouped OOF target encoding of
+  post_area. No sector identity; the register's own activity-type flags
+  (holding, dormant) stay in as tells.
+- PR-AUC 0.199 (4.2x base rate), ROC-AUC 0.848, P@100 0.42, P@1000 0.233.
+  Controls: shuffle 0.049, demographics-only 0.070.
+- Universe audit: top 1% is 34.7% real estate (3.2x), holding-SIC moves the mean
+  score by nothing (0.112 vs 0.122). [`docs/bias-audit.md`](docs/bias-audit.md).
+- Intended use: anonymous structural triage, an ordering of where to look.
+
+### v5, retired
+
+- 10-seed LightGBM soft-vote with tell interactions, target encodings of
+  post_area, sic_section and sic_code, plus raw sic_section. Winner of the jul14
+  autoresearch round (22 experiments,
+  [`autoresearch/REPORT.md`](autoresearch/REPORT.md)).
+- PR-AUC 0.377 (8.0x), ROC-AUC 0.882, P@100 0.95, P@1000 0.373. All controls
+  passed.
+- Retired by the universe audit: top 1% was 99.3% real estate at 9.1x lift and
+  holding-SIC alone moved the mean score from 0.206 to 0.309. A strong ranker
+  that had become a corporate-structure detector.
+
+### v6 to v10, the ablation trail
+
+| v | change | PR-AUC | top 1% real estate |
+|---|---|---:|---:|
+| 6 | drop sic_code TE (single seed) | 0.371 | 88.3% |
+| 7 | drop sic_section TE too | 0.362 | 97.5% |
+| 8 | drop all structure features | 0.184 | not scored |
+| 9 | drop only raw sic_section | 0.186 | not scored |
+| 10 | v9 recipe, tuned, 10 seeds | 0.196 | not scored |
+
+The TE ablations (v6, v7) barely moved the concentration because the raw
+sic_section categorical carried the sector the whole time. Removing it (v9)
+halves the measured PR-AUC; the audit on v11 indicates the half that remains
+reads the disclosure. An owner-degree feature (companies per named PSC owner,
+`owner_degree` FG) was tested against v11 and rejected: it found formation
+agents, hurt PR-AUC, and never touched the labels.

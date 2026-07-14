@@ -71,3 +71,11 @@ Caveat that bounds all of this: the label is PU-learned via name matching, so
 0.377 is precision against later-revealed owners only. Unrevealed true positives
 sitting in the negatives depress every number here uniformly; the ranking between
 experiments is trustworthy, the absolute PR-AUC is a lower bound.
+
+## Postscript (2026-07-14, same day)
+
+The winner was retired hours later. Scoring the full universe showed its top 1%
+was 99.3% real estate against 13.8% of training positives; the raw sic_section
+categorical carried the sector, and no experiment in this round ablated it (the
+TE ablations left it in CAT). The sector-blind rebuild is `empty_chair` v11,
+PR-AUC 0.199. Trail: docs/bias-audit.md and the README model cards.
