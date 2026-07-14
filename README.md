@@ -21,7 +21,7 @@ family property firms, dormant shells with nothing to hide.
 
 ## The result
 
-`empty_chair` v4, a 10-seed LightGBM soft-vote over the 28 registry and PSC
+`empty_chair` v5, a 10-seed LightGBM soft-vote over the 28 registry and PSC
 (people-with-significant-control) features plus tell interactions and grouped
 out-of-fold target encodings. Held out by formation-address cluster so no company
 mill straddles train and test. The recipe came out of an autoresearch round
@@ -60,9 +60,9 @@ Read these before quoting the number.
   House by normalized exact match. Single-token generic names are down-weighted, but
   the match set carries false positives that no one has hand-verified; treat the
   positive labels as noisy.
-- **Rank, not probability.** Calibration holds on the 20:1 case-control sample, not
-  on the 5.7M population. The app presents a population **percentile**, not a
-  probability of concealment.
+- **Rank, not probability.** The model is uncalibrated by design (a monotone map
+  cannot improve a ranking metric). The app presents a population **percentile**,
+  never a probability of concealment.
 - **Disclosure shape, not intent.** The model never sees who owns the company. A
   high rank is a structural resemblance, never proof of concealment.
 
@@ -171,7 +171,7 @@ conversation at that owner. Replies interpret the figures concretely, percentile
 arithmetic and tell base rates included, under the same never-accuse constraints.
 Without JavaScript it degrades to a full-page round trip.
 
-## Cost note: where the v4 gain lives
+## Cost note: where the v5 gain lives
 
 The 10-seed vote is the expensive part of the recipe and the smallest part of the
 gain. Of the +0.091 PR-AUC over the v3 baseline: +0.028 came from switching to
