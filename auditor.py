@@ -20,7 +20,7 @@ from chair_features import (CONCEALMENT_FLAGS, derive_features, primary_sic,
                             psc_features, registry_features)
 
 MODEL_NAME = "empty_chair"
-MODEL_VERSION = 6  # single-seed LGBM, TE without sic_code (v5 top 1% was 99.3% real estate, docs/bias-audit.md)
+MODEL_VERSION = 7  # single-seed LGBM, post_area TE only; sector TE out after the v5/v6 audits (docs/bias-audit.md)
 
 
 @functools.lru_cache(maxsize=1)
