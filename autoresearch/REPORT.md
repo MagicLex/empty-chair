@@ -70,4 +70,4 @@ matches the demographics control.
 Caveat that bounds all of this: the label is PU-learned via name matching, so
 0.377 is precision against later-revealed owners only. Unrevealed true positives
 sitting in the negatives depress every number here uniformly; the ranking between
-experiments is trustworthy, the absolute PR-AUC is a floor, not a truth.
+experiments is trustworthy, the absolute PR-AUC is a lower bound.

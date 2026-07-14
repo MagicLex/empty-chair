@@ -5,7 +5,7 @@
 [![awesome-ml-systems](https://img.shields.io/badge/awesome--ml--systems-%23011-34d399?labelColor=0b0e11&style=flat)](https://github.com/MagicLex/awesome-ml-systems)
 [![Hopsworks](https://img.shields.io/badge/built_on-Hopsworks-1CB182?labelColor=0b0e11&style=flat)](https://www.hopsworks.ai/)
 
-The inverse model. Most detectors hunt the suspicious thing that is present: the
+Most detectors hunt the suspicious thing that is present: the
 nominee with 400 directorships, the offshore address. This one hunts the thing
 that is deliberately absent. It scores a UK company for how much its public
 ownership **disclosure** is shaped like the structures where a hidden beneficial
@@ -39,10 +39,10 @@ lifted PR-AUC 31.7% over the v3 HistGradientBoosting baseline.
 | demographics-only control (PR-AUC) | 0.070 |
 | shuffle-label control (PR-AUC) | 0.050 |
 
-The controls are the point. The naive investigator rule (flag anything silent,
+The naive investigator rule (flag anything silent,
 corporate-only, or foreign-corporate) scores at the base rate: useless alone. A
 demographics-only model (incorporation year, sector, region) barely beats chance,
-so the signal is **not** population bias, it is the shape of the disclosure. The
+so the signal sits in the shape of the disclosure. The
 shuffle-label run collapses to chance, so there is no leak, target encodings
 included. Of the 100 companies the model flags hardest, 95 are genuine
 later-revealed cases at a 4.8% base rate. The autoresearch round also pruned the
@@ -157,8 +157,7 @@ companies as red bridges.
 connected graphs (the largest joins 100+ owners). All graphs are server-rendered SVG
 that works without JavaScript; with it, they hydrate into pan/zoom, ego-highlight on
 hover, tooltips, and draggable nodes over a spring simulation seeded from the server
-layout. The rank comes from the ML model; the note only explains it, signal not
-verdict.
+layout. The rank comes from the ML model; the note only explains it.
 
 Every page carries **Ask the register**, a full-height chat drawer pinned to the
 right edge. The model (`ask.py`) answers only through deterministic tools over the
