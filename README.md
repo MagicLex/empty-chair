@@ -170,3 +170,15 @@ knows which page is open, and clicking any owner square in a graph points the
 conversation at that owner. Replies interpret the figures concretely, percentile
 arithmetic and tell base rates included, under the same never-accuse constraints.
 Without JavaScript it degrades to a full-page round trip.
+
+## Cost note: where the v4 gain lives
+
+The 10-seed vote is the expensive part of the recipe and the smallest part of the
+gain. Of the +0.091 PR-AUC over the v3 baseline: +0.028 came from switching to
+LightGBM, +0.024 from dropping class weighting, +0.020 from dropping isotonic
+calibration (a monotone map cannot improve a ranking metric and its slice returns
+to the fit), +0.012 from interaction features and target encodings, and +0.006
+from the 10-seed ensemble, inside the round's ±0.002 noise floor. The ensemble
+multiplies universe scoring from minutes to about 45 minutes for 5.7M companies.
+A single-seed variant scores 0.368 at a tenth of the cost and sits in the
+`autoresearch_jul14` registry versions if that trade is ever preferred.
