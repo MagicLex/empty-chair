@@ -198,9 +198,10 @@ CONCEALMENT_FLAGS = {
 # the te_maps ship inside the model artifact (te_maps.json).
 DERIVED_NUM = ["n_tells", "mill_x_no_individual", "mill_x_silence",
                "dormant_x_corp_only", "holding_x_foreign", "foreign_corp_ratio"]
-# sic_code dropped after the v5 bias audit: encoding full SIC let the model rank
-# on sector directly and the universe top 1% collapsed to real estate (99.3%).
-TE_COLS = ["post_area", "sic_section"]
+# SIC encodings dropped after the v5/v6 bias audits: any sector TE lets the model
+# rank on sector directly and the universe top 1% collapses to real estate
+# (99.3% with sic_code, still 88.3% with sic_section only). docs/bias-audit.md.
+TE_COLS = ["post_area"]
 _TELLS = ["psc_absent", "psc_silence", "psc_corporate_only", "psc_super_secure",
           "psc_exempt", "is_mill_address", "is_holding_sic", "accounts_dormant"]
 
